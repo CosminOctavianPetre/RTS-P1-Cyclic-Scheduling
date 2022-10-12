@@ -1,0 +1,15 @@
+Run these commands in a terminal window:
+
+0. Create a "build" directory:
+	mkdir build
+	cd build
+
+1. Run CMake: the "RTEMS_INSTALL_PATH" variable must be provided;
+it should be the full path to the RTEMS5 installation directory, e.g. "/home/user/rtems-dev":
+	cmake -DRTEMS_INSTALL_PATH=<RTEMS5-INSTALLATION-PATH> -DCMAKE_TOOLCHAIN_FILE=../toolchain/i386-rtems5.cmake ..
+
+2. Compile:
+	make
+
+3. Run:
+	qemu-system-i386 -kernel <executable>
