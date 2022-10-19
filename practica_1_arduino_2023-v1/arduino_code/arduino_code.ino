@@ -134,6 +134,17 @@ void mixer_system()
     digitalWrite(MIXER, mixer_is_active);
 }
 
+void show_current_speed(){
+    if (speed <= 40){
+      analogWrite(SPEED, 0);
+    }else if (speed >= 70){
+      analogWrite(SPEED,255);
+    }else{
+      int pwm_value = (int) ((speed-40)*255)/30;
+      analogWrite(SPEED, pwm_value);
+    }
+}
+
 // --------------------------------------
 // Function: setup
 // --------------------------------------
@@ -154,16 +165,18 @@ void setup()
 void loop()
 {
     unsigned long time_exec_begin, time_exec_end, elapsed;
-
     time_exec_begin = micros();
-    acceleration_system();
-    time_exec_end = micros();
+    //compute time code    
+    show_current_speed();
 
+
+
+
+    time_exec_end = micros();
     elapsed = time_exec_end - time_exec_begin;
     Serial.println(elapsed);
-    acceleration_is_active = !acceleration_is_active;
     delay(1000);
-
+    speed += 0.25;
     // comm_server();
     // speed_req();
     
