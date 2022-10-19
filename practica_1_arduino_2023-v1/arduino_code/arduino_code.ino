@@ -12,6 +12,16 @@
 #define MESSAGE_SIZE 8
 
 // --------------------------------------
+// PIN numbers
+// --------------------------------------
+#define ACCELERATION 13
+#define BRAKE 12
+#define MIXER 11
+#define SPEED 10
+#define DOWN 8
+#define UP 9
+
+// --------------------------------------
 // Global Variables
 // --------------------------------------
 double speed = 55.5;
@@ -19,6 +29,11 @@ bool request_received = false;
 bool requested_answered = false;
 char request[MESSAGE_SIZE+1];
 char answer[MESSAGE_SIZE+1];
+bool acceleration_is_active = false;
+bool brake_is_active = false;
+bool mixer_is_active = false;
+unsigned long time_exec_begin;
+unsigned long time_exec_end;
 
 // --------------------------------------
 // Function: comm_server
@@ -94,10 +109,22 @@ int speed_req()
 }
 
 // --------------------------------------
+// Function: acceleration
+// --------------------------------------
+void acceleration_led()
+{
+  //Worst compute time 12 MICROseconds not miliseconds
+   digitalWrite(ACCELERATION, acceleration_is_active);
+}
+
+// --------------------------------------
 // Function: setup
 // --------------------------------------
 void setup()
 {
+   pinMode(ACCELERATION, OUTPUT);
+   pinMode(BRAKE, OUTPUT);
+   pinMode(MIXER, OUTPUT);
    // Setup Serial Monitor
    Serial.begin(9600);
 }
@@ -107,6 +134,14 @@ void setup()
 // --------------------------------------
 void loop()
 {
-   comm_server();
+  time_exec_begin = micros();
+  acceleration_led();
+  time_exec_end = micros();
+  unsigned long elapsed = time_exec_end - time_exec_begin;
+  Serial.println(elapsed);
+  delay(1000);
+  acceleration_is_active = !acceleration_is_active;
+/*   comm_server();
    speed_req();
+*/
 }
