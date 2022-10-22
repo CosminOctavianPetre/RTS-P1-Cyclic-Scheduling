@@ -10,6 +10,7 @@
 // --------------------------------------
 #define SLAVE_ADDR 0x8
 #define MESSAGE_SIZE 8
+#define us 1000000
 
 // --------------------------------------
 // PIN numbers
@@ -33,6 +34,10 @@ char answer[MESSAGE_SIZE+1];
 bool acceleration_is_active = false;
 bool brake_is_active = false;
 bool mixer_is_active = false;
+
+int railway_slope = 0; //0 = Flat, 1 = Down, 2 = Up
+unsigned long speed_last_measure_time;
+
 
 // --------------------------------------
 // Function: comm_server
@@ -87,6 +92,7 @@ int comm_server()
     }
 }
 
+
 // --------------------------------------
 // Function: speed_req
 // --------------------------------------
@@ -107,6 +113,7 @@ int speed_req()
     return 0;
 }
 
+
 // --------------------------------------
 // Function: acceleration_system
 // --------------------------------------
@@ -115,6 +122,7 @@ void acceleration_system()
     // Worst compute time 16 MICROseconds not miliseconds
     digitalWrite(ACCELERATION, acceleration_is_active);
 }
+
 
 // --------------------------------------
 // Function: brake_system
@@ -125,6 +133,7 @@ void brake_system()
     digitalWrite(BRAKE, brake_is_active);
 }
 
+
 // --------------------------------------
 // Function: mixer_system
 // --------------------------------------
@@ -134,7 +143,52 @@ void mixer_system()
     digitalWrite(MIXER, mixer_is_active);
 }
 
-void show_current_speed(){
+
+// --------------------------------------
+// Function: read_slope
+// --------------------------------------
+void read_slope()
+{
+    int up = digitalRead(UP);
+    int down = digitalRead(DOWN);
+    if (up == 0 && down == 0) {
+      railway_slope = 0;
+    } else if (up == 1) {
+      railway_slope = 2;
+    } else {
+      railway_slope = 1;      
+    }
+}
+
+
+// --------------------------------------
+// Function: update_speed
+// --------------------------------------
+void update_speed()
+{
+    unsigned long time_new, delta;
+    double acceleration;
+
+    time_new = micros();
+    //TODO: handle overflow
+    delta = time_new - speed_last_measure_time;
+    speed_last_measure_time = time_new;
+
+    acceleration = 0.5 * acceleration_is_active - 0.5 * brake_is_active;
+    if (railway_slope)
+        acceleration += (railway_slope == 1) ? 0.25 : -0.25;
+
+    speed += (double) acceleration * (delta/us);
+}
+
+
+// --------------------------------------
+// Function: show_current_speed
+// --------------------------------------
+void show_current_speed()
+{
+    update_speed();
+
     if (speed <= 40){
       analogWrite(SPEED, 0);
     }else if (speed >= 70){
@@ -143,7 +197,16 @@ void show_current_speed(){
       int pwm_value = (int) ((speed-40)*255)/30;
       analogWrite(SPEED, pwm_value);
     }
+
+    // send the answer for speed request
+    char speed_str_tmp[5], speed_str[16];
+    strcpy(speed_str, "speed: ");
+
+    dtostrf(speed, 2,2, speed_str_tmp);
+    sprintf(speed_str, "%s %s", speed_str, speed_str_tmp);
+    Serial.println(speed_str);
 }
+
 
 // --------------------------------------
 // Function: setup
@@ -154,10 +217,16 @@ void setup()
     pinMode(ACCELERATION, OUTPUT);
     pinMode(BRAKE, OUTPUT);
     pinMode(MIXER, OUTPUT);
+    pinMode(DOWN, INPUT);
+    pinMode(UP, INPUT);
+    pinMode(SPEED, OUTPUT);
 
     // Setup Serial Monitor
     Serial.begin(9600);
+
+    speed_last_measure_time = micros();
 }
+
 
 // --------------------------------------
 // Function: loop
@@ -165,18 +234,18 @@ void setup()
 void loop()
 {
     unsigned long time_exec_begin, time_exec_end, elapsed;
+
+    read_slope();
     time_exec_begin = micros();
     //compute time code    
     show_current_speed();
 
-
-
-
     time_exec_end = micros();
     elapsed = time_exec_end - time_exec_begin;
-    Serial.println(elapsed);
+    // Serial.println(elapsed);
     delay(1000);
-    speed += 0.25;
+    // speed += 1;
+    // if (speed >= 70) speed = 40;
     // comm_server();
     // speed_req();
     
