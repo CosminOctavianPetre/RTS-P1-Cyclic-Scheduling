@@ -41,6 +41,7 @@ unsigned long speed_last_measure_time;
 
 // --------------------------------------
 // Function: comm_server
+// Worst compute time: 212 microseconds (including request functions)
 // --------------------------------------
 int comm_server()
 {
@@ -113,39 +114,127 @@ int speed_req()
     return 0;
 }
 
+// --------------------------------------
+// Function: slope_req
+// --------------------------------------
+int slope_req()
+{
+    // If there is a request not answered, check if this is the one
+    if ( (request_received) && (!requested_answered) && 
+        (0 == strcmp("SLP: REQ\n",request)) ) {
+
+        // send the answer for speed request
+        if (railway_slope == 0) {
+          sprintf(answer,"SLP:FLAT\n");
+        } else if (railway_slope == 1) {
+          sprintf(answer,"SLP:DOWN\n");
+        } else {
+          sprintf(answer,"SLP:  UP\n");
+        }
+    
+        // set request as answered
+        requested_answered = true;
+    }
+    return 0;
+}
+
+
+// --------------------------------------
+// Function: accelerator_req
+// --------------------------------------
+int accelator_req()
+{
+    // If there is a request not answered, check if this is the one
+    if ( (request_received) && (!requested_answered) && 
+        ((0 == strcmp("GAS: SET\n",request)) || 0 == strcmp("GAS: CLR\n",request)) ) {
+        if (0 == strcmp("GAS: SET\n",request)){
+          acceleration_is_active = true;
+        } else{
+          acceleration_is_active = false;
+        }
+        // send the answer for speed request
+        sprintf(answer,"GAS:  OK\n");
+        // set request as answered
+        requested_answered = true;
+    }
+    return 0;
+}
+
+// --------------------------------------
+// Function: brake_req
+// --------------------------------------
+int brake_req()
+{
+    // If there is a request not answered, check if this is the one
+    if ( (request_received) && (!requested_answered) && 
+        ((0 == strcmp("BRK: SET\n",request)) || 0 == strcmp("BRK: CLR\n",request)) ) {
+        if (0 == strcmp("BRK: SET\n",request)){
+          brake_is_active = true;
+        } else{
+          brake_is_active = false;
+        }
+        // send the answer for speed request
+        sprintf(answer,"BRK:  OK\n");
+        // set request as answered
+        requested_answered = true;
+    }
+    return 0;
+}
+
+// --------------------------------------
+// Function: mixer_req
+// --------------------------------------
+int mixer_req()
+{
+    // If there is a request not answered, check if this is the one
+    if ( (request_received) && (!requested_answered) && 
+        ((0 == strcmp("MIX: SET\n",request)) || 0 == strcmp("MIX: CLR\n",request)) ) {
+        if (0 == strcmp("MIX: SET\n",request)){
+          mixer_is_active = true;
+        } else{
+          mixer_is_active = false;
+        }
+        // send the answer for speed request
+        sprintf(answer,"MIX:  OK\n");
+        // set request as answered
+        requested_answered = true;
+    }
+    return 0;
+}
 
 // --------------------------------------
 // Function: acceleration_system
+// Worst compute time: 16 microseconds
 // --------------------------------------
 void acceleration_system()
 {
-    // Worst compute time 16 MICROseconds not miliseconds
     digitalWrite(ACCELERATION, acceleration_is_active);
 }
 
 
 // --------------------------------------
 // Function: brake_system
+// Worst compute time: 16 microseconds
 // --------------------------------------
 void brake_system()
 {
-    // Worst compute time 
     digitalWrite(BRAKE, brake_is_active);
 }
 
 
 // --------------------------------------
 // Function: mixer_system
+// Worst compute time: 16 microseconds
 // --------------------------------------
 void mixer_system()
 {
-    // Worst compute time 
     digitalWrite(MIXER, mixer_is_active);
 }
 
 
 // --------------------------------------
 // Function: read_slope
+// Worst compute time: 20 microseconds
 // --------------------------------------
 void read_slope()
 {
@@ -184,6 +273,7 @@ void update_speed()
 
 // --------------------------------------
 // Function: show_current_speed
+// Worst compute time: 108 microseconds
 // --------------------------------------
 void show_current_speed()
 {
@@ -199,12 +289,13 @@ void show_current_speed()
     }
 
     // send the answer for speed request
-    char speed_str_tmp[5], speed_str[16];
+    /*char speed_str_tmp[5], speed_str[16];
     strcpy(speed_str, "speed: ");
 
     dtostrf(speed, 2,2, speed_str_tmp);
     sprintf(speed_str, "%s %s", speed_str, speed_str_tmp);
     Serial.println(speed_str);
+    */
 }
 
 
@@ -235,18 +326,28 @@ void loop()
 {
     unsigned long time_exec_begin, time_exec_end, elapsed;
 
-    read_slope();
     time_exec_begin = micros();
     //compute time code    
-    show_current_speed();
-
+    comm_server();
+    speed_req();
+    slope_req();
+    accelator_req();
+    brake_req();
+    mixer_req();
     time_exec_end = micros();
     elapsed = time_exec_end - time_exec_begin;
-    // Serial.println(elapsed);
+    
+    Serial.println(elapsed);
     delay(1000);
-    // speed += 1;
     // if (speed >= 70) speed = 40;
-    // comm_server();
-    // speed_req();
+    
+    
+    /*comm_server();
+    speed_req();
+    slope_req();
+    accelator_req();
+    brake_req();
+    mixer_req();
+  */  
     
 }
