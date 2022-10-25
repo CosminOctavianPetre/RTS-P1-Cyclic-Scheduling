@@ -12,6 +12,7 @@
 #define MESSAGE_SIZE        8
 #define MAX_UNSIGNED_LONG   0xffffffffUL
 #define us                  1000000UL
+#define SC_TIME             50UL
 
 
 // --------------------------------------
@@ -23,6 +24,19 @@
 #define SPEED           10
 #define DOWN            8
 #define UP              9
+
+
+// --------------------------------------
+// Slope Legal Values
+// --------------------------------------
+typedef enum{flat = 0, down = 1, up = 2} slope_t;
+
+
+// --------------------------------------
+// Speed Limits
+// --------------------------------------
+#define SPEED_MIN   40.0
+#define SPEED_MAX   70.0
 
 
 // --------------------------------------
@@ -78,25 +92,22 @@ bool gas_is_active = false;
 bool brake_is_active = false;
 bool mixer_is_active = false;
 double speed = 55.5;
-//0 = Flat, 1 = Down, 2 = Up
-int railway_slope = 0; 
+slope_t railway_slope = flat; 
 
 unsigned long speed_last_measure_time;
 
 // Scheduler stuff
-int sc = 0; // secondary cycle
+unsigned long sc = 0; // secondary cycle
 unsigned long exe_start_time;
-unsigned long sc_time = 50UL;
 
 
 // --------------------------------------
 // Function: comm_server
-// Worst compute time: 212 μs
 // --------------------------------------
-int comm_server()
+void comm_server()
 {
     static int count = 0;
-    char car_aux;
+    char char_aux;
 
     // If there were a received msg, send the processed answer or ERROR if none.
     // then reset for the next request.
@@ -104,85 +115,80 @@ int comm_server()
     //       answers have been processed.
     if (request_received) {
         // if there is an answer send it, else error
-        if (requested_answered) {
+        if (requested_answered)
             Serial.print(answer);
-        } else {
-            Serial.print("MSG: ERR\n");
-        }  
+        else
+            Serial.print(ANS_ERROR);
+
         // reset flags and buffers
         request_received = false;
         requested_answered = false;
-        memset(request,'\0', MESSAGE_SIZE+1);
-        memset(answer,'\0', MESSAGE_SIZE+1);
+        memset(request, '\0', MESSAGE_SIZE+1);
+        memset(answer, '\0', MESSAGE_SIZE+1);
     }
 
     while (Serial.available()) {
         // read one character
-        car_aux =Serial.read();
-        
-        //skip if it is not a valid character
-        if  ( ( (car_aux < 'A') || (car_aux > 'Z') ) &&
-        (car_aux != ':') && (car_aux != ' ') && (car_aux != '\n') ) {
+        char_aux = Serial.read();
+          
+        // skip if it is not a valid character
+        if ( ( char_aux < 'A' || char_aux > 'Z' ) &&
+        char_aux != ':' && char_aux != ' ' && char_aux != '\n' ) {
             continue;
         }
-      
-        //Store the character
-        request[count] = car_aux;
-      
+        
+        // Store the character
+        request[count] = char_aux;
+        
         // If the last character is an enter or
         // There are 9th characters set an enter and finish.
-        if ( (request[count] == '\n') || (count == 8) ) {
+        if ( request[count] == '\n' || count == 8 ) {
             request[count] = '\n';
             count = 0;
             request_received = true;
             break;
         }
 
-        // Increment the count
         count++;
     }
-
-    // return 0;
 }
 
 
 // --------------------------------------
 // Function: speed_req
 // --------------------------------------
-int speed_req()
-{
+void speed_req()
+{ 
     // If there is a request not answered, check if this is the one
-    if ( request_received && !requested_answered && (0 == strcmp("SPD: REQ\n", request)) ) {
-        // send answer for read speed request
+    if ( !strcmp(REQ_SPEED, request) ) {  
+        // send the answer for speed request
         char num_str[5];
         dtostrf(speed, 4,1, num_str);
-        sprintf(answer, "SPD:%s\n", num_str);
+        sprintf(answer, ANS_SPEED, num_str);
 
         // set request as answered
         requested_answered = true;
     }
-
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: slope_req
 // --------------------------------------
-int slope_req()
+void slope_req()
 {
     // If there is a request not answered, check if this is the one
-    if ( request_received && !requested_answered && !strcmp("SLP: REQ\n", request) ) {
+    if ( !strcmp(REQ_SLOPE, request) ) {
         // send answer for read slope request
         switch (railway_slope) {
-            case 0:
-                sprintf(answer, "SLP:FLAT\n");
+            case flat:
+                sprintf(answer, ANS_SLOPE_FLAT);
                 break;
-            case 1:
-                sprintf(answer, "SLP:DOWN\n");
+            case down:
+                sprintf(answer, ANS_SLOPE_DOWN);
                 break;
-            case 2:
-                sprintf(answer, "SLP:  UP\n");
+            case up:
+                sprintf(answer, ANS_SLOPE_UP);
                 break;
             default:
                 break;
@@ -191,157 +197,140 @@ int slope_req()
         // set request as answered
         requested_answered = true;
     }
-
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: gas_req
 // --------------------------------------
-int gas_req()
+void gas_req()
 {
     int set, clr;
 
-    set = strcmp("GAS: SET\n", request);
-    clr = strcmp("GAS: CLR\n", request);
+    set = strcmp(REQ_GAS_SET, (const char *) request);
+    clr = strcmp(REQ_GAS_CLR, (const char *) request);
 
     // If there is a request not answered, check if this is the one
-    if ( request_received && !requested_answered && (!set || !clr) ) {
-        //TODO: refactor
-        // gas_is_active = !set + !clr;
-        if (!set)
-            gas_is_active = true;
-        else
-            gas_is_active = false;
+    if (!set || !clr) {
+        gas_is_active = !set + clr;
 
         // send answer for "activating accelerator" request
-        sprintf(answer, "GAS:  OK\n");
+        sprintf(answer, ANS_GAS_OK);
         // set request as answered
         requested_answered = true;
     }
-
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: brake_req
 // --------------------------------------
-int brake_req()
+void brake_req()
 {
     int set, clr;
 
-    set = strcmp("BRK: SET\n", request);
-    clr = strcmp("BRK: CLR\n", request);
+    set = strcmp(REQ_BRK_SET, (const char *) request);
+    clr = strcmp(REQ_BRK_CLR, (const char *) request);
 
     // If there is a request not answered, check if this is the one
-    if ( request_received && !requested_answered && (!set || !clr) ) {
-        //TODO: refactor
-        // brake_is_active = !set + !clr;
-        if (!set)
-            brake_is_active = true;
-        else
-            brake_is_active = false;
+    if (!set || !clr) {
+        brake_is_active = !set + clr;
 
         // send answer for "activating brake" request
-        sprintf(answer, "BRK:  OK\n");
+        sprintf(answer, ANS_BRK_OK);
         // set request as answered
         requested_answered = true;
     }
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: mixer_req
 // --------------------------------------
-int mixer_req()
+void mixer_req()
 {
     int set, clr;
 
-    set = strcmp("MIX: SET\n", request);
-    clr = strcmp("MIX: CLR\n", request);
+    set = strcmp(REQ_MIX_SET, (const char *) request);
+    clr = strcmp(REQ_MIX_CLR, (const char *) request);
 
     // If there is a request not answered, check if this is the one
-    if ( request_received && !requested_answered && (!set || !clr) ) {
-        //TODO: refactor
-        // mixer_is_active = !set + !clr;
-        if (!set)
-            mixer_is_active = true;
-        else
-            mixer_is_active = false;
+    if (!set || !clr) {
+        mixer_is_active = !set + clr;
 
         // send answer for "activating mixer" request
-        sprintf(answer, "MIX:  OK\n");
+        sprintf(answer, ANS_MIX_OK);
         // set request as answered
         requested_answered = true;
     }
-    return 0;
+}
+
+
+// --------------------------------------
+// Function: req_handler
+// --------------------------------------
+void req_handler()
+{
+    if (!request_received || requested_answered)
+        return;
+
+    speed_req();
+    slope_req();
+    gas_req();
+    brake_req();
+    mixer_req();
+}
+
+
+// --------------------------------------
+// Function: comm_server_wrapper
+// Task: Communication Server
+// Worst Compute Time: 9368 μs
+// --------------------------------------
+void comm_server_wrapper()
+{
+    comm_server();
+    req_handler();
 }
 
 
 // --------------------------------------
 // Function: acceleration_system
-// Worst compute time: 16 μs
+// Task: On/Off Accelerator
+// Worst Compute Time: 16 μs
 // --------------------------------------
-int acceleration_system()
+void acceleration_system()
 {
     digitalWrite(ACCELERATION, gas_is_active);
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: brake_system
-// Worst compute time: 16 μs
+// Task: On/Off Brake
+// Worst Compute Time: 16 μs
 // --------------------------------------
-int brake_system()
+void brake_system()
 {
     digitalWrite(BRAKE, brake_is_active);
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: mixer_system
-// Worst compute time: 16 μs
+// Task: On/Off Mixer
+// Worst Compute Time: 16 μs
 // --------------------------------------
-int mixer_system()
+void mixer_system()
 {
     digitalWrite(MIXER, mixer_is_active);
-    return 0;
-}
-
-
-// --------------------------------------
-// Function: read_slope
-// Worst compute time: 20 μs
-// --------------------------------------
-int read_slope()
-{
-    int up, down;
-
-    up = digitalRead(UP);
-    down = digitalRead(DOWN);
-
-    //TODO: refactor
-    if (up == 0 && down == 0) {
-        railway_slope = 0;
-    } else if (up == 1) {
-        railway_slope = 2;
-    } else {
-        railway_slope = 1;      
-    }
-
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: update_speed
 // --------------------------------------
-int update_speed()
+void update_speed()
 {
     unsigned long speed_new_measure_time, delta;
     double acceleration;
@@ -350,29 +339,25 @@ int update_speed()
 
     // get elapsed time between speed measurements
     if (speed_last_measure_time > speed_new_measure_time)
-	    delta = MAX_UNSIGNED_LONG - speed_last_measure_time + speed_new_measure_time;
-	else
-	    delta = speed_new_measure_time - speed_last_measure_time;
+        delta = MAX_UNSIGNED_LONG - speed_last_measure_time + speed_new_measure_time;
+    else
+        delta = speed_new_measure_time - speed_last_measure_time;
 
     speed_last_measure_time = speed_new_measure_time;
 
-    //TODO: refactor
-    // acceleration = MOD_GAS*gas_is_active + MOD_BRK*brake_is_active MOD_SLOPE_DOWN*(railway_slope == 1) + MOD_SLOPE_UP*(railway_slope == 2);
-    acceleration = 0.5*gas_is_active - 0.5*brake_is_active;
-    if (railway_slope)
-        acceleration += (railway_slope == 1) ? 0.25 : -0.25;
+    acceleration = MOD_GAS*gas_is_active + MOD_BRK*brake_is_active +
+    MOD_SLOPE_DOWN*(railway_slope == down) + MOD_SLOPE_UP*(railway_slope == up);
 
     speed += (double) acceleration * (delta/us);
-
-    return 0;
 }
 
 
 // --------------------------------------
 // Function: show_current_speed
-// Worst compute time: 108 μs
+// Task: Compute and Show Speed
+// Worst Compute Time: 128 μs
 // --------------------------------------
-int show_current_speed()
+void show_current_speed()
 {
     int pwm_value;
 
@@ -380,29 +365,23 @@ int show_current_speed()
     update_speed();
 
     // change speed LED intensity
-    //TODO: refactor
-    //pwm_value = (unsigned long) map(speed, 40, 70, 0, 255);
-
-    if (speed <= 40) {
-        pwm_value = 0;
-    } else if (speed >= 70) {
-        pwm_value = 255;
-    } else {
-        pwm_value = (int) ((speed - 40)*255) / 30;
-    }
+    // if speed is out of bounds, the LED turns off
+    pwm_value = ( speed != constrain(speed, SPEED_MIN, SPEED_MAX) ) ? 0
+    : (int) map(speed, SPEED_MIN, SPEED_MAX, 0, 255);
 
     analogWrite(SPEED, pwm_value);
+}
 
-    /*
-    char speed_str_tmp[5], speed_str[16];
-    strcpy(speed_str, "speed: ");
 
-    dtostrf(speed, 2,2, speed_str_tmp);
-    sprintf(speed_str, "%s %s", speed_str, speed_str_tmp);
-    Serial.println(speed_str);
-    */
-
-    return 0;
+// --------------------------------------
+// Function: read_slope
+// Task: Read Slope
+// Worst Compute Time: 12 μs
+// --------------------------------------
+void read_slope()
+{
+    // read slope pins and compute current slope
+    railway_slope = (slope_t) (flat + down*digitalRead(DOWN) + up*digitalRead(UP));
 }
 
 
@@ -412,15 +391,14 @@ int show_current_speed()
 void setup()
 {
     // set pins
-    pinMode(ACCELERATION, OUTPUT);
-    pinMode(BRAKE, OUTPUT);
-    pinMode(MIXER, OUTPUT);
-    pinMode(SPEED, OUTPUT);
+    pinMode(ACCELERATION,   OUTPUT);
+    pinMode(BRAKE,          OUTPUT);
+    pinMode(MIXER,          OUTPUT);
+    pinMode(SPEED,          OUTPUT);
+    pinMode(DOWN,           INPUT);
+    pinMode(UP,             INPUT);
 
-    pinMode(DOWN, INPUT);
-    pinMode(UP, INPUT);
-
-    // Set up Serial Monitor
+    // Setup Serial Monitor
     Serial.begin(9600);
 
     // set initial speed measure time
@@ -430,70 +408,63 @@ void setup()
     exe_start_time = millis();
 }
 
-int count = 0;
+
 // --------------------------------------
 // Function: loop
 // --------------------------------------
 void loop()
 {
-    acceleration_system();
-    brake_system();
-    mixer_system();
-    show_current_speed();
-    read_slope();
-    comm_server();
-    speed_req();
-    slope_req();
-    gas_req();
-    brake_req();
-    mixer_req();
-
-    // unsigned long exe_end_time, delta;
+    unsigned long exe_end_time, delta;
     
-    // // execute tasks
-    // switch (sc) {
-    //     case 0:
-    //         acceleration_system();
-    //         brake_system();
-    //         break;
-    //     case 1:
-    //         mixer_system();
-    //         show_current_speed();
-    //         break;
-    //     case 2:
-    //         read_slope();
-    //         comm_server();
-    //         break;
-    //     case 3:
-    //         // handle requests
-    //         speed_req();
-    //         slope_req();
-    //         gas_req();
-    //         brake_req();
-    //         mixer_req();
-    //         break;
-    // }
+    // execute tasks
+    switch (sc) {
+        case 0:
+            acceleration_system();
+            brake_system();
+            break;
+        case 1:
+            mixer_system();
+            show_current_speed();
+            break;
+        case 2:
+            read_slope();
+            break;
+        case 3:
+            comm_server_wrapper();
+            break;
+    }
 
-    // sc = (sc + 1) % 4;
-    // exe_end_time = millis();
+    sc = (sc + 1) % 4;
+    exe_end_time = millis();
 
-    // //Serial.println(count++);
-    // // get elapsed execution time
-    // if (exe_start_time > exe_end_time) {
-    //     delta = MAX_UNSIGNED_LONG - exe_start_time + exe_end_time;
-    // } else {
-    //     delta = exe_end_time - exe_start_time;
-    // }
+    //TODO: fix this
+    // without this print it detects overflow and dies for some reason
 
-    // //Serial.println(delta);
-    // // check if execution took too long
-    // if (sc_time < delta) {
-    //     //Serial.println("exit");
-    //     //exit(-1);
-    // }
+    // char str[80];
+    // sprintf(str, "s:%lu e:%lu", exe_start_time, exe_end_time);
+    // Serial.println(str);
 
-    // // wait until next secondary cycle
-    // //Serial.println(delta);
-    // delay(sc_time - delta);
-    // exe_start_time += sc_time;
+    // get elapsed execution time
+    if (exe_start_time > exe_end_time) {
+        Serial.println("overflow");
+        delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
+    } else {
+        delta = (unsigned long) (exe_end_time - exe_start_time);
+    }
+
+    char str[80];
+    sprintf(str, "s:%lu e:%lu d:%lu", exe_start_time, exe_end_time, delta);
+    Serial.println(str);
+
+    //Serial.println(delta);
+    // check if execution took too long
+    if (SC_TIME < delta) {
+        Serial.println("exit");
+        exit(-1);
+    }
+
+    // wait until next secondary cycle
+    //Serial.println(delta);
+    delay(SC_TIME - delta);
+    exe_start_time += SC_TIME;
 }
