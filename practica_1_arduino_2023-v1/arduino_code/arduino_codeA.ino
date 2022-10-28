@@ -348,7 +348,7 @@ void update_speed()
     acceleration = MOD_GAS*gas_is_active + MOD_BRK*brake_is_active +
     MOD_SLOPE_DOWN*(railway_slope == down) + MOD_SLOPE_UP*(railway_slope == up);
 
-    speed += (double) acceleration * (delta/us);
+    speed += (double) acceleration * ((double) delta/us);
 }
 
 
@@ -452,9 +452,9 @@ void loop()
         delta = (unsigned long) (exe_end_time - exe_start_time);
     }
 
-    char str[80];
-    sprintf(str, "s:%lu e:%lu d:%lu", exe_start_time, exe_end_time, delta);
-    Serial.println(str);
+    //char str[80];
+    //sprintf(str, "s:%lu e:%lu d:%lu", exe_start_time, exe_end_time, delta);
+    //Serial.println(str);
 
     //Serial.println(delta);
     // check if execution took too long
@@ -465,6 +465,6 @@ void loop()
 
     // wait until next secondary cycle
     //Serial.println(delta);
-    delay(SC_TIME - delta);
+    delay(SC_TIME - delta+5);
     exe_start_time += SC_TIME;
 }
