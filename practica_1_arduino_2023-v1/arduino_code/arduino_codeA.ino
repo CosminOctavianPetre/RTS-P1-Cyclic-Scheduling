@@ -437,13 +437,6 @@ void loop()
     sc = (sc + 1) % 4;
     exe_end_time = millis();
 
-    //TODO: fix this
-    // without this print it detects overflow and dies for some reason
-
-    // char str[80];
-    // sprintf(str, "s:%lu e:%lu", exe_start_time, exe_end_time);
-    // Serial.println(str);
-
     // get elapsed execution time
     if (exe_start_time > exe_end_time) {
         Serial.println("overflow");
@@ -452,11 +445,6 @@ void loop()
         delta = (unsigned long) (exe_end_time - exe_start_time);
     }
 
-    //char str[80];
-    //sprintf(str, "s:%lu e:%lu d:%lu", exe_start_time, exe_end_time, delta);
-    //Serial.println(str);
-
-    //Serial.println(delta);
     // check if execution took too long
     if (SC_TIME < delta) {
         Serial.println("exit");
@@ -464,7 +452,6 @@ void loop()
     }
 
     // wait until next secondary cycle
-    //Serial.println(delta);
     delay(SC_TIME - delta+5);
     exe_start_time += SC_TIME;
 }
