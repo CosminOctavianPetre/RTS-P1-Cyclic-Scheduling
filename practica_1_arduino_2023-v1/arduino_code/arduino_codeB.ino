@@ -455,9 +455,9 @@ void read_slope()
 // --------------------------------------
 void read_ldr()
 {
-    // read LDR analog pin and return the value in percentage from 0 to 100
+    // read LDR analog pin and return the value in percentage from 0 to 99
     int ldr_analog = analogRead(LDR);
-    ldr_value = (int) map(ldr_analog, 0, 1024, 0, 100);
+    ldr_value = (int) map(ldr_analog, 0, 1024, 0, 99);
 }
 
 
