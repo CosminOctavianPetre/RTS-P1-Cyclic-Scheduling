@@ -349,12 +349,6 @@ void mixer_task()
 }
 
 
-void lamps_task()
-{
-    digitalWrite(LAMPS, lamps_is_active);
-}
-
-
 void display_speed_task()
 {
     unsigned char speed_led_pwm_value;
@@ -377,14 +371,6 @@ void read_slope_task()
 {
     // read slope pins and compute current slope
     railway_slope = (slope_t) (flat + down*digitalRead(DOWN) + up*digitalRead(UP));
-}
-
-
-void read_ldr_task()
-{
-    // read LDR analog pin and convert the value to a percentage
-    int ldr_analog = analogRead(LDR);
-    ldr_value = (unsigned char) map(ldr_analog, 0, 1024, LDR_VAL_MIN, LDR_VAL_MAX);
 }
 
 
