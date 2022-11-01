@@ -35,7 +35,6 @@
 #define DECO_A          2
 
 
-
 // --------------------------------------
 // Analog PIN Numbers
 // --------------------------------------
@@ -60,7 +59,7 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define LDR_VAL_MIN     0
 #define LDR_VAL_MAX     99
 
-//Distance
+// Distance to Deposit
 #define DEPO_DIST_MIN   10000
 #define DEPO_DIST_MAX   90000
 
@@ -117,6 +116,15 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
     set = strcmp((SET_REQ), (const char *) request); \
     clr = strcmp((CLR_REQ), (const char *) request);
 
+// used to get task compute time
+#define TIME_TASK(TASK) \
+    unsigned long time_exec_begin, time_exec_end, elapsed; \
+    time_exec_begin = micros(); \
+    (TASK); \
+    time_exec_end = micros(); \
+    elapsed = time_exec_end - time_exec_begin;
+
+//TODO: REMOVE THIS
 #define SET_7_SEG_DISPLAY(BIT3, BIT2, BIT1, BIT0) \
     digitalWrite(DECO_D, (BIT3)); \
     digitalWrite(DECO_C, (BIT2)); \
@@ -200,6 +208,7 @@ void read_ldr_task();
 
 // Aux functions
 void update_speed();
+void set_7seg_display(const unsigned char digit);
 void comm_server();
 // Get requests
 void req_get_speed();
@@ -215,6 +224,30 @@ void req_set_lamps();
 // --------------------------------------
 // Aux functions
 // --------------------------------------
+void set_7seg_display(const unsigned char digit)
+{
+    unsigned char bit3, bit2, bit1, bit0;
+
+    // get individual bits from given digit
+    bit3 = digit & 0b00001000;
+    bit2 = digit & 0b00000100;
+    bit1 = digit & 0b00000010;
+    bit0 = digit & 0b00000001;
+
+    //TODO: REMOVE THIS after checking it works
+    Serial.println(bit3);
+    Serial.println(bit2);
+    Serial.println(bit1);
+    Serial.println(bit0);
+
+    // now set 7 segment display
+    digitalWrite(DECO_D, bit3);
+    digitalWrite(DECO_C, bit2);
+    digitalWrite(DECO_B, bit1);
+    digitalWrite(DECO_A, bit0);
+}
+
+
 void update_speed()
 {
     unsigned long speed_new_measure_time, delta;
@@ -444,43 +477,45 @@ void display_speed_task()
 
     analogWrite(SPEED, speed_led_pwm_value);
 }
-void display_depo_dist_task(){
-    char display = (char) (depo_distance/10000);
-    switch(display){
-        case 0:
-            SET_7_SEG_DISPLAY(0,0,0,0)
-            break;
-        case 1:
-            SET_7_SEG_DISPLAY(0,0,0,1)
-            break;
-        case 2:
-            SET_7_SEG_DISPLAY(0,0,1,0)
-            break;
-        case 3:
-            SET_7_SEG_DISPLAY(0,0,1,1)
-            break;
-        case 4:
-            SET_7_SEG_DISPLAY(0,1,0,0)
-            break;
-        case 5:
-            SET_7_SEG_DISPLAY(0,1,0,1)
-            break;
-        case 6:
-            SET_7_SEG_DISPLAY(0,1,1,0)
-            break;
-        case 7:
-            SET_7_SEG_DISPLAY(0,1,1,1)
-            break;
-        case 8:
-            SET_7_SEG_DISPLAY(1,0,0,0)
-            break;
-        case 9:
-            SET_7_SEG_DISPLAY(1,0,0,1)
-            break;       
-    }    
 
+//TODO
+void display_depo_dist_task()
+{
+    unsigned char display_digit = (unsigned char) (depo_distance/10000);
+    set_7seg_display(display_digit);
 
-  
+    // switch(display_digit){
+    //     case 0:
+    //         SET_7_SEG_DISPLAY(0,0,0,0)
+    //         break;
+    //     case 1:
+    //         SET_7_SEG_DISPLAY(0,0,0,1)
+    //         break;
+    //     case 2:
+    //         SET_7_SEG_DISPLAY(0,0,1,0)
+    //         break;
+    //     case 3:
+    //         SET_7_SEG_DISPLAY(0,0,1,1)
+    //         break;
+    //     case 4:
+    //         SET_7_SEG_DISPLAY(0,1,0,0)
+    //         break;
+    //     case 5:
+    //         SET_7_SEG_DISPLAY(0,1,0,1)
+    //         break;
+    //     case 6:
+    //         SET_7_SEG_DISPLAY(0,1,1,0)
+    //         break;
+    //     case 7:
+    //         SET_7_SEG_DISPLAY(0,1,1,1)
+    //         break;
+    //     case 8:
+    //         SET_7_SEG_DISPLAY(1,0,0,0)
+    //         break;
+    //     case 9:
+    //         SET_7_SEG_DISPLAY(1,0,0,1)
+    //         break;       
+    // }    
 }
 
 
@@ -498,6 +533,7 @@ void read_ldr_task()
     ldr_value = (unsigned char) map(ldr_analog, 0, 1024, LDR_VAL_MIN, LDR_VAL_MAX);
 }
 
+//TODO
 void read_potentiometer_task()
 {
     // read potentiometer analog pin and convert the value to a distance
@@ -505,11 +541,13 @@ void read_potentiometer_task()
     depo_distance = (unsigned long) map(potentio_analog, 0, 1024, DEPO_DIST_MIN, DEPO_DIST_MAX);
 }
 
-void read_button_task(){
+//TODO
+void read_button_task()
+{
     int value = digitalRead(PUSH_BUTTON);
     if ((old_value_button == 0) && (value == 1)){
-      actual_distance = depo_distance;
-      Serial.println(actual_distance);
+        actual_distance = depo_distance;
+        Serial.println(actual_distance);
     }
     old_value_button = value;
 }
@@ -543,7 +581,10 @@ void setup()
 
 void loop()
 {
-  /*  unsigned long exe_end_time, delta;
+    read_potentiometer_task();
+    display_depo_dist_task();
+
+    /*  unsigned long exe_end_time, delta;
     
     // execute tasks
     switch (sc) {
@@ -587,21 +628,6 @@ void loop()
 
     */
 
-
-
-    unsigned long time_exec_begin, time_exec_end, elapsed;
-    time_exec_begin = micros();
-    //compute time code
-    read_button_task();
-    delay(100);
-
-
-    
-
-    time_exec_end = micros();
-    elapsed = time_exec_end - time_exec_begin;
-    // comm_server();
-    // speed_req();
-
+    //TIME_TASK( read_button_task() );
+    // delay(100);
 }
-
