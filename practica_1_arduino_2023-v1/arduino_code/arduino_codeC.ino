@@ -124,13 +124,6 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
     time_exec_end = micros(); \
     elapsed = time_exec_end - time_exec_begin;
 
-//TODO: REMOVE THIS
-#define SET_7_SEG_DISPLAY(BIT3, BIT2, BIT1, BIT0) \
-    digitalWrite(DECO_D, (BIT3)); \
-    digitalWrite(DECO_C, (BIT2)); \
-    digitalWrite(DECO_B, (BIT1)); \
-    digitalWrite(DECO_A, (BIT0));
-
 
 // --------------------------------------
 // Global Variables
@@ -205,6 +198,23 @@ void read_slope_task();
 // Worst Compute Time: 212 μs
 // --------------------------------------
 void read_ldr_task();
+// --------------------------------------
+// Task: Compute distance digit and show it 
+// Worst Compute Time: 64 μs
+// --------------------------------------
+void display_depo_dist_task();
+// --------------------------------------
+// Task: Read potentiometer value 
+// Worst Compute Time: 208 μs
+// --------------------------------------
+void read_potentiometer_task();
+// --------------------------------------
+// Task: Read button and take actual distance
+// Worst Compute Time: 264 μs
+// --------------------------------------
+void read_button_task();
+
+
 
 // Aux functions
 void update_speed();
@@ -233,12 +243,6 @@ void set_7seg_display(const unsigned char digit)
     bit2 = digit & 0b00000100;
     bit1 = digit & 0b00000010;
     bit0 = digit & 0b00000001;
-
-    //TODO: REMOVE THIS after checking it works
-    Serial.println(bit3);
-    Serial.println(bit2);
-    Serial.println(bit1);
-    Serial.println(bit0);
 
     // now set 7 segment display
     digitalWrite(DECO_D, bit3);
@@ -478,44 +482,11 @@ void display_speed_task()
     analogWrite(SPEED, speed_led_pwm_value);
 }
 
-//TODO
+
 void display_depo_dist_task()
 {
     unsigned char display_digit = (unsigned char) (depo_distance/10000);
     set_7seg_display(display_digit);
-
-    // switch(display_digit){
-    //     case 0:
-    //         SET_7_SEG_DISPLAY(0,0,0,0)
-    //         break;
-    //     case 1:
-    //         SET_7_SEG_DISPLAY(0,0,0,1)
-    //         break;
-    //     case 2:
-    //         SET_7_SEG_DISPLAY(0,0,1,0)
-    //         break;
-    //     case 3:
-    //         SET_7_SEG_DISPLAY(0,0,1,1)
-    //         break;
-    //     case 4:
-    //         SET_7_SEG_DISPLAY(0,1,0,0)
-    //         break;
-    //     case 5:
-    //         SET_7_SEG_DISPLAY(0,1,0,1)
-    //         break;
-    //     case 6:
-    //         SET_7_SEG_DISPLAY(0,1,1,0)
-    //         break;
-    //     case 7:
-    //         SET_7_SEG_DISPLAY(0,1,1,1)
-    //         break;
-    //     case 8:
-    //         SET_7_SEG_DISPLAY(1,0,0,0)
-    //         break;
-    //     case 9:
-    //         SET_7_SEG_DISPLAY(1,0,0,1)
-    //         break;       
-    // }    
 }
 
 
@@ -533,7 +504,6 @@ void read_ldr_task()
     ldr_value = (unsigned char) map(ldr_analog, 0, 1024, LDR_VAL_MIN, LDR_VAL_MAX);
 }
 
-//TODO
 void read_potentiometer_task()
 {
     // read potentiometer analog pin and convert the value to a distance
@@ -567,6 +537,7 @@ void setup()
     pinMode(DECO_C,         OUTPUT);
     pinMode(DECO_B,         OUTPUT);
     pinMode(DECO_A,         OUTPUT);
+    pinMode(PUSH_BUTTON,    INPUT);
 
     // Setup Serial Monitor
     Serial.begin(9600);
@@ -581,9 +552,6 @@ void setup()
 
 void loop()
 {
-    read_potentiometer_task();
-    display_depo_dist_task();
-
     /*  unsigned long exe_end_time, delta;
     
     // execute tasks
@@ -627,7 +595,7 @@ void loop()
     exe_start_time += SC_TIME;
 
     */
-
-    //TIME_TASK( read_button_task() );
-    // delay(100);
+    TIME_TASK( read_button_task() );
+    delay(100);
+    Serial.println(elapsed);
 }
