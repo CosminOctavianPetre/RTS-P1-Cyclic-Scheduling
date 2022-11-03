@@ -1,26 +1,26 @@
-// --------------------------------------
+// ------------------------------------
 // Include files
-// --------------------------------------
+// ------------------------------------
 #include <string.h>
 #include <stdio.h>
 #include <Wire.h>
 
-// --------------------------------------
+// ------------------------------------
 // Global Constants
-// --------------------------------------
+// ------------------------------------
 #define SLAVE_ADDR          0x8
 #define MESSAGE_SIZE        8+2             // useful message size + required overhead ("/n", "/0")
 #define MAX_UNSIGNED_LONG   0xffffffffUL
-#define us                  1000000UL
+#define us                  1000000UL       // number of microsenconds in a second
 // Cyclic Scheduler stuff
 #define NUM_SC              2               // number of secondary cycles per main cycle
 #define SC_TIME             100UL           // secondary cycle time length
 #define SC_REQUIRED_WAIT    5UL             // required time to wait for next secondary cycle
 
 
-// --------------------------------------
+// ------------------------------------
 // Digital PIN Numbers
-// --------------------------------------
+// ------------------------------------
 #define ACCELERATION    13
 #define BRAKE           12
 #define MIXER           11
@@ -35,22 +35,22 @@
 #define DECO_A          2
 
 
-// --------------------------------------
+// ------------------------------------
 // Analog PIN Numbers
-// --------------------------------------
+// ------------------------------------
 #define LDR             0
 #define POTENTIOMETER   1
 
 
-// --------------------------------------
+// ------------------------------------
 // Slope Legal Values
-// --------------------------------------
+// ------------------------------------
 typedef enum{flat = 0, down = 1, up = 2} slope_t;
 
 
-// --------------------------------------
+// ------------------------------------
 // Limits
-// --------------------------------------
+// ------------------------------------
 // Speed
 #define SPEED_MIN       40.0
 #define SPEED_MAX       70.0
@@ -64,18 +64,18 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define DEPO_DIST_MAX   90000
 
 
-// --------------------------------------
+// ------------------------------------
 // Speed Modifiers
-// --------------------------------------
+// ------------------------------------
 #define MOD_GAS         0.5
 #define MOD_BRK         -0.5
 #define MOD_SLOPE_DOWN  0.25
 #define MOD_SLOPE_UP    -0.25
 
 
-// --------------------------------------
+// ------------------------------------
 // Messages
-// --------------------------------------
+// ------------------------------------
 // Requests
 #define REQ_SPEED       "SPD: REQ\n"
 #define REQ_SLOPE       "SLP: REQ\n"
@@ -102,9 +102,10 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define ANS_LAM_OK      "LAM:  OK\n"
 
 
-// --------------------------------------
+// ------------------------------------
 // Macros
-// --------------------------------------
+// ------------------------------------
+
 // write to "answer" buffer and set flag
 #define SET_ANSWER(...) \
     sprintf(answer, __VA_ARGS__); \
@@ -125,9 +126,10 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
     elapsed = time_exec_end - time_exec_begin;
 
 
-// --------------------------------------
+// ------------------------------------
 // Global Variables
-// --------------------------------------
+// ------------------------------------
+
 // Comm server stuff
 bool request_received = false;
 bool requested_answered = false;
@@ -153,73 +155,75 @@ unsigned char sc = 0; // secondary cycle
 unsigned long exe_start_time;
 
 
-// --------------------------------------
+// ------------------------------------
 // Function Prototypes
-// --------------------------------------
-// Tasks
+// ------------------------------------
 
-// --------------------------------------
+/************** Tasks ****************/
+
+// ------------------------------------
 // Task: Communication Server
 // Worst Compute Time: 9368 μs
-// --------------------------------------
+// ------------------------------------
 void comm_server_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Accelerator
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void acceleration_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Brake
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void brake_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Mixer
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void mixer_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Lamps
 // Worst Compute Time: 8 μs
-// --------------------------------------
+// ------------------------------------
 void lamps_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Compute and Show Speed
 // Worst Compute Time: 128 μs
-// --------------------------------------
+// ------------------------------------
 void display_speed_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Read Slope
 // Worst Compute Time: 12 μs
-// --------------------------------------
+// ------------------------------------
 void read_slope_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Read LDR value
 // Worst Compute Time: 212 μs
-// --------------------------------------
+// ------------------------------------
 void read_ldr_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Compute distance digit and show it 
 // Worst Compute Time: 64 μs
-// --------------------------------------
+// ------------------------------------
 void display_depo_dist_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Read potentiometer value 
 // Worst Compute Time: 208 μs
-// --------------------------------------
+// ------------------------------------
 void read_potentiometer_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Read button and take actual distance
 // Worst Compute Time: 264 μs
-// --------------------------------------
+// ------------------------------------
 void read_button_task();
 
-
-
-// Aux functions
+/********** Aux functions ************/
 void update_speed();
 void set_7seg_display(const unsigned char digit);
 void comm_server();
+
+/******** Request Handlers ***********/
+
 // Get requests
 void req_get_speed();
 void req_get_slope();
@@ -231,9 +235,7 @@ void req_set_mixer();
 void req_set_lamps();
 
 
-// --------------------------------------
-// Aux functions
-// --------------------------------------
+/********** Aux functions ************/
 void set_7seg_display(const unsigned char digit)
 {
     unsigned char bit3, bit2, bit1, bit0;
@@ -324,9 +326,7 @@ void comm_server()
 }
 
 
-// --------------------------------------
-// Request Handlers
-// --------------------------------------
+/******** Request Handlers ***********/
 void req_get_speed()
 { 
     // check request
@@ -421,9 +421,7 @@ void req_set_lamps()
 }
 
 
-// --------------------------------------
-// Tasks
-// --------------------------------------
+/************** Tasks ****************/
 void comm_server_task()
 {
     comm_server();
@@ -511,7 +509,7 @@ void read_potentiometer_task()
     depo_distance = (unsigned long) map(potentio_analog, 0, 1024, DEPO_DIST_MIN, DEPO_DIST_MAX);
 }
 
-//TODO
+
 void read_button_task()
 {
     int value = digitalRead(PUSH_BUTTON);

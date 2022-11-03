@@ -1,26 +1,26 @@
-// --------------------------------------
+// ------------------------------------
 // Include files
-// --------------------------------------
+// ------------------------------------
 #include <string.h>
 #include <stdio.h>
 #include <Wire.h>
 
-// --------------------------------------
+// ------------------------------------
 // Global Constants
-// --------------------------------------
+// ------------------------------------
 #define SLAVE_ADDR          0x8
 #define MESSAGE_SIZE        8+2             // useful message size + required overhead ("/n", "/0")
 #define MAX_UNSIGNED_LONG   0xffffffffUL
-#define us                  1000000UL
+#define us                  1000000UL       // number of microsenconds in a second
 // Cyclic Scheduler stuff
 #define NUM_SC              4               // number of secondary cycles per main cycle
 #define SC_TIME             50UL            // secondary cycle time length
 #define SC_REQUIRED_WAIT    5UL             // required time to wait for next secondary cycle
 
 
-// --------------------------------------
+// ------------------------------------
 // Digital PIN Numbers
-// --------------------------------------
+// ------------------------------------
 #define ACCELERATION    13
 #define BRAKE           12
 #define MIXER           11
@@ -29,32 +29,32 @@
 #define UP              8
 
 
-// --------------------------------------
+// ------------------------------------
 // Slope Legal Values
-// --------------------------------------
+// ------------------------------------
 typedef enum{flat = 0, down = 1, up = 2} slope_t;
 
 
-// --------------------------------------
+// ------------------------------------
 // Limits
-// --------------------------------------
+// ------------------------------------
 // Speed
 #define SPEED_MIN       40.0
 #define SPEED_MAX       70.0
 
 
-// --------------------------------------
+// ------------------------------------
 // Speed Modifiers
-// --------------------------------------
+// ------------------------------------
 #define MOD_GAS         0.5
 #define MOD_BRK         -0.5
 #define MOD_SLOPE_DOWN  0.25
 #define MOD_SLOPE_UP    -0.25
 
 
-// --------------------------------------
+// ------------------------------------
 // Messages
-// --------------------------------------
+// ------------------------------------
 // Requests
 #define REQ_SPEED       "SPD: REQ\n"
 #define REQ_SLOPE       "SLP: REQ\n"
@@ -76,9 +76,10 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define ANS_MIX_OK      "MIX:  OK\n"
 
 
-// --------------------------------------
+// ------------------------------------
 // Macros
-// --------------------------------------
+// ------------------------------------
+
 // write to "answer" buffer and set flag
 #define SET_ANSWER(...) \
     sprintf(answer, __VA_ARGS__); \
@@ -91,9 +92,10 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
     clr = strcmp((CLR_REQ), (const char *) request);
 
 
-// --------------------------------------
+// ------------------------------------
 // Global Variables
-// --------------------------------------
+// ------------------------------------
+
 // Comm server stuff
 bool request_received = false;
 bool requested_answered = false;
@@ -104,7 +106,6 @@ char answer[MESSAGE_SIZE];
 bool gas_is_active = false;
 bool brake_is_active = false;
 bool mixer_is_active = false;
-bool lamps_is_active = false;
 double speed = 55.5;
 slope_t railway_slope = flat;
 
@@ -115,45 +116,49 @@ unsigned char sc = 0; // secondary cycle
 unsigned long exe_start_time;
 
 
-// --------------------------------------
+// ------------------------------------
 // Function Prototypes
-// --------------------------------------
-// Tasks
+// ------------------------------------
 
-// --------------------------------------
+/************** Tasks ****************/
+
+// ------------------------------------
 // Task: Communication Server
 // Worst Compute Time: 9368 μs
-// --------------------------------------
+// ------------------------------------
 void comm_server_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Accelerator
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void acceleration_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Brake
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void brake_task();
-// --------------------------------------
+// ------------------------------------
 // Task: On/Off Mixer
 // Worst Compute Time: 16 μs
-// --------------------------------------
+// ------------------------------------
 void mixer_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Compute and Show Speed
 // Worst Compute Time: 128 μs
-// --------------------------------------
+// ------------------------------------
 void display_speed_task();
-// --------------------------------------
+// ------------------------------------
 // Task: Read Slope
 // Worst Compute Time: 12 μs
-// --------------------------------------
+// ------------------------------------
 void read_slope_task();
 
-// Aux functions
+/********** Aux functions ************/
 void update_speed();
 void comm_server();
+
+/******** Request Handlers ***********/
+
 // Get requests
 void req_get_speed();
 void req_get_slope();
@@ -163,9 +168,7 @@ void req_set_brake();
 void req_set_mixer();
 
 
-// --------------------------------------
-// Aux functions
-// --------------------------------------
+/********** Aux functions ************/
 void update_speed()
 {
     unsigned long speed_new_measure_time, delta;
@@ -238,9 +241,7 @@ void comm_server()
 }
 
 
-// --------------------------------------
-// Request Handlers
-// --------------------------------------
+/******** Request Handlers ***********/
 void req_get_speed()
 { 
     // check request
@@ -313,9 +314,7 @@ void req_set_mixer()
 }
 
 
-// --------------------------------------
-// Tasks
-// --------------------------------------
+/************** Tasks ****************/
 void comm_server_task()
 {
     comm_server();
