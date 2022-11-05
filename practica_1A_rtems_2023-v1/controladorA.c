@@ -38,6 +38,9 @@ int compTime(struct timespec t1, struct timespec t2);
 #define SLAVE_ADDR                  0x8
 #define MIXER_STATE_CHANGE_PERIOD   30      // mixer's state should change every this much
 
+// Speed Control stuff
+#define AVG_SPEED                   55.0F   // average speed to maintain
+
 // Cyclic Scheduler stuff
 #define NUM_SC                      1       // number of secondary cycles per main cycle
 #define SC_TIME                     10      // secondary cycle time length
@@ -93,6 +96,11 @@ struct timespec mixer_state_change_last_time;
     memset(BUF1, 0, MSG_LEN+1); \
     memset(BUF2, 0, MSG_LEN+1);
 
+// prepare a request buffer, send the request and get the response
+#define MAKE_REQUEST(req_buf, ans_buf, REQ) \
+    strcpy(req_buf, REQ); \
+    send_req_b(req_buf, ans_buf);
+
 
 // ------------------------------------
 // Function Prototypes
@@ -103,23 +111,20 @@ struct timespec mixer_state_change_last_time;
 // ------------------------------------
 // Task: Read Speed
 // ------------------------------------
-int task_speed();
+void task_get_speed();
 // ------------------------------------
 // Task: Read Slope
 // ------------------------------------
-int task_slope();
+void task_get_slope();
 // ------------------------------------
-// Task: On/Off Accelerator
+// Task: On/Off Accelerator & Brake
+// Combination of two tasks
 // ------------------------------------
-int task_gas();
-// ------------------------------------
-// Task: On/Off Brake
-// ------------------------------------
-int task_brake();
+void task_set_gas_brake();
 // ------------------------------------
 // Task: On/Off Mixer
 // ------------------------------------
-int task_mixer();
+void task_set_mixer();
 
 /********** Aux functions ************/
 
@@ -190,104 +195,75 @@ void send_req_b(char *request, char *answer)
 
 
 /************** Tasks ****************/
-int task_speed()
+void task_get_speed()
 {    
     char request[MSG_LEN+1];
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
 
-    // request speed
-    strcpy(request, REQ_SPEED);
-
-    send_req_b(request, answer);
+    MAKE_REQUEST(request, answer, REQ_SPEED);
 
     if (1 == sscanf(answer, ANS_SPEED, &speed)){
         displaySpeed(speed);
     }
-    return 0;
 }
 
 
-int task_slope()
+void task_get_slope()
 {
     char request[MSG_LEN+1];
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
 
-    // request slope
-    strcpy(request, REQ_SLOPE);
-    send_req_b(request, answer);
+    MAKE_REQUEST(request, answer, REQ_SLOPE);
 
     // display slope
-    if (0 == strcmp(answer, ANS_SLOPE_DOWN)) displaySlope(-1);
-    if (0 == strcmp(answer, ANS_SLOPE_FLAT)) displaySlope(0);
-    if (0 == strcmp(answer, ANS_SLOPE_UP)) displaySlope(1);
-
-    return 0;
+    if ( !strcmp(answer, ANS_SLOPE_DOWN) )
+        displaySlope(-1);
+    if ( !strcmp(answer, ANS_SLOPE_FLAT) )
+        displaySlope(0);
+    if ( !strcmp(answer, ANS_SLOPE_UP) )
+        displaySlope(1);
 }
 
 
-int task_gas()
+void task_set_gas_brake()
 {
     char request[MSG_LEN+1];
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
 
-    if (speed > 55)
-        goto end;
-    // at this point, the wagon should speed up
-    /* NOTE: two calls might be needed to speed up completely
-    *  one call to turn off the brake, another to turn on the gas */
-    if (brake_is_active) {
-        strcpy(request, REQ_BRK_CLR);
-        brake_is_active = 0;
+    if (speed > AVG_SPEED) {
+        // at this point, the wagon should slow down
+        if (gas_is_active) {
+            MAKE_REQUEST(request, answer, REQ_GAS_CLR);
+            gas_is_active = 0;
+        }
+        if (!brake_is_active) {
+            MAKE_REQUEST(request, answer, REQ_BRK_SET);
+            brake_is_active = 1;
+        }
     } else {
-        strcpy(request, REQ_GAS_SET);
-        gas_is_active = 1;
+        // at this point, the wagon should speed up
+        if (!gas_is_active) {
+            MAKE_REQUEST(request, answer, REQ_GAS_SET);
+            gas_is_active = 1;
+        }
+        if (brake_is_active) {
+            MAKE_REQUEST(request, answer, REQ_BRK_CLR);
+            brake_is_active = 0;
+        }
     }
 
-end:
-    // send request, get answer and display gas
-    send_req_b(request, answer);
     displayGas(gas_is_active);
-
-    return 0;
-}
-
-
-int task_brake()
-{
-    char request[MSG_LEN+1];
-    char answer[MSG_LEN+1];
-
-    CLEAR_BUFFERS(request, answer);
-
-    if (speed <= 55)
-        goto end;
-    // at this point, the wagon should slow down
-    /* NOTE: two calls might be needed to slow down completely
-    *  one call to turn off the gas, another to turn on the brake */
-    if (gas_is_active) {
-        strcpy(request, REQ_GAS_CLR);
-        gas_is_active = 0;
-    } else {
-        strcpy(request, REQ_BRK_SET);
-        brake_is_active = 1;
-    }
-
-end:
-    // send request, get answer and display brake
-    send_req_b(request, answer);
     displayBrake(brake_is_active);
-
-    return 0;
 }
 
 
-int task_mixer()
+void task_set_mixer()
 {
     char request[MSG_LEN+1];
     char answer[MSG_LEN+1];
@@ -303,26 +279,20 @@ int task_mixer()
 
     // check if 30 seconds have passed since the last state change
     if ( compTime(delta, mixer_state_change_period) < 0 )
-        goto end;
+        return;
     
     switch (mixer_is_active) {
         case 0:
+            MAKE_REQUEST(request, answer, REQ_MIX_SET);
             mixer_is_active = 1;
-            strcpy(request, REQ_MIX_SET);
             break;
         case 1:
+            MAKE_REQUEST(request, answer, REQ_MIX_CLR);
             mixer_is_active = 0;
-            strcpy(request, REQ_MIX_CLR);
             break;
     }
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
-
-end:
-    // send request, get answer and display mixer
-    send_req_b(request, answer);
     displayMix(mixer_is_active);
-
-    return 0;
 }
 
 
@@ -339,11 +309,10 @@ void *controller(void *arg)
 
     while(1) {
         // execute tasks
-        task_speed();
-        task_slope();
-        task_gas();
-        task_brake();
-        task_mixer();
+        task_get_speed();
+        task_get_slope();
+        task_set_gas_brake();
+        task_set_mixer();
 
         clock_gettime(CLOCK_REALTIME, &exe_end_time);
         diffTime(exe_end_time, exe_start_time, &delta);
