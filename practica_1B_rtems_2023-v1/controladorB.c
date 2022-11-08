@@ -1,5 +1,5 @@
 //-Uncomment to compile with arduino support
-//#define ARDUINO
+#define ARDUINO
 
 //-------------------------------------
 //-  Include files
@@ -125,10 +125,13 @@ void task_get_speed();
 // ------------------------------------
 void task_get_slope();
 // ------------------------------------
-// Task: On/Off Accelerator & Brake
-// Combination of two tasks
+// Task: On/Off Accelerator
 // ------------------------------------
-void task_set_gas_brake();
+void task_set_gas();
+// ------------------------------------
+// Task: On/Off Brake
+// ------------------------------------
+void task_set_brake();
 // ------------------------------------
 // Task: On/Off Mixer
 // ------------------------------------
@@ -176,10 +179,7 @@ int read_msg(int fd, char *buffer, int max_size)
         aux_buf[count] = char_aux;
 
         // increment count in a circular way
-        //TODO: refactor
-        //count = (count + 1) % MSG_LEN;
-        count = count + 1;
-        if (count == MSG_LEN) count = 0;
+        count = (count + 1) % MSG_LEN;
 
         // if character is new_line return answer
         if (char_aux == '\n') {
@@ -217,12 +217,10 @@ void task_get_speed()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
-
     MAKE_REQUEST(request, answer, REQ_SPEED);
 
-    if (1 == sscanf(answer, ANS_SPEED, &speed)){
+    if ( sscanf(answer, ANS_SPEED, &speed) == 1 )
         displaySpeed(speed);
-    }
 }
 
 
@@ -232,7 +230,6 @@ void task_get_slope()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
-
     MAKE_REQUEST(request, answer, REQ_SLOPE);
 
     // display slope
@@ -245,7 +242,7 @@ void task_get_slope()
 }
 
 
-void task_set_gas_brake()
+void task_set_gas()
 {
     char request[MSG_LEN+1];
     char answer[MSG_LEN+1];
@@ -258,23 +255,39 @@ void task_set_gas_brake()
             MAKE_REQUEST(request, answer, REQ_GAS_CLR);
             gas_is_active = 0;
         }
-        if (!brake_is_active) {
-            MAKE_REQUEST(request, answer, REQ_BRK_SET);
-            brake_is_active = 1;
-        }
     } else {
         // at this point, the wagon should speed up
         if (!gas_is_active) {
             MAKE_REQUEST(request, answer, REQ_GAS_SET);
             gas_is_active = 1;
         }
+    }
+
+    displayGas(gas_is_active);
+}
+
+
+void task_set_brake()
+{
+    char request[MSG_LEN+1];
+    char answer[MSG_LEN+1];
+
+    CLEAR_BUFFERS(request, answer);
+
+    if (speed > AVG_SPEED) {
+        // at this point, the wagon should slow down
+        if (!brake_is_active) {
+            MAKE_REQUEST(request, answer, REQ_BRK_SET);
+            brake_is_active = 1;
+        }
+    } else {
+        // at this point, the wagon should speed up
         if (brake_is_active) {
             MAKE_REQUEST(request, answer, REQ_BRK_CLR);
             brake_is_active = 0;
         }
     }
 
-    displayGas(gas_is_active);
     displayBrake(brake_is_active);
 }
 
@@ -319,10 +332,9 @@ void task_get_light()
     unsigned char light_value;
 
     CLEAR_BUFFERS(request, answer);
-
     MAKE_REQUEST(request, answer, REQ_LIT);
 
-    if (1 == sscanf(answer, ANS_LIT, &light_value)) {
+    if ( sscanf(answer, ANS_LIT, &light_value) == 1 ) {
         is_dark = light_value < LIGHT_SENSOR_DARK_THRESH;
         displayLightSensor(is_dark);
     }
@@ -360,6 +372,12 @@ void *controller(void *arg)
     clock_gettime(CLOCK_REALTIME, &exe_start_time);
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
 
+#if defined(ARDUINO)
+    // wait for comms to be set up
+    // NOTE: QEMU can't talk to Arduino over serial device without this
+    sleep(1);
+#endif
+
     while(1) {
         // execute tasks
         switch (sc) {
@@ -373,7 +391,8 @@ void *controller(void *arg)
             case 1:
                 task_get_light();
                 task_set_lamps();
-                task_set_gas_brake();
+                task_set_gas();
+                task_set_brake();
                 break;
         }
         
