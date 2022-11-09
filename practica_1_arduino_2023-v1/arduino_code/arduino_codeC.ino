@@ -49,6 +49,12 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 
 
 // ------------------------------------
+// Movement Legal Values
+// ------------------------------------
+typedef enum{go = 0, stop = 1} movement_t;
+
+
+// ------------------------------------
 // Limits
 // ------------------------------------
 // Speed
@@ -88,6 +94,8 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define REQ_LIT         "LIT: REQ\n"
 #define REQ_LAM_SET     "LAM: SET\n"
 #define REQ_LAM_CLR     "LAM: CLR\n"
+#define REQ_STP         "STP: REQ\n"
+#define REQ_DIS         "DS:  REQ\n" 
 
 // Answers
 #define ANS_ERROR       "MSG: ERR\n"
@@ -100,6 +108,10 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 #define ANS_MIX_OK      "MIX:  OK\n"
 #define ANS_LIT         "LIT: %.2d%%\n"
 #define ANS_LAM_OK      "LAM:  OK\n"
+#define ANS_STP_GO      "STP:  GO\n"
+#define ANS_STP_STOP    "STP:STOP\n"
+#define ANS_DIS         "DS:%.5d%\n"
+
 
 
 // ------------------------------------
@@ -147,6 +159,7 @@ unsigned char ldr_value = 0;
 unsigned long depo_distance = 10000;
 unsigned long actual_distance = 0;
 char old_value_button = 0;
+movement_t movement = go;
 
 unsigned long speed_last_measure_time;
 
@@ -228,6 +241,7 @@ void comm_server();
 void req_get_speed();
 void req_get_slope();
 void req_get_lit();
+void req_get_dis();
 // Set requests
 void req_set_gas();
 void req_set_brake();
@@ -368,6 +382,30 @@ void req_get_lit()
     }
 }
 
+void req_get_dis()
+{ 
+    // check request
+    if ( !strcmp(REQ_DIS, request) ) {  
+        SET_ANSWER(ANS_DIS, actual_distance);
+    }
+}
+
+
+void req_get_movement()
+{
+    // check request
+    if ( !strcmp(REQ_STP, request) ) {
+        // set answer according to current slope
+        switch (movement) {
+            case go:
+                SET_ANSWER(ANS_STP_GO);
+                break;
+            case stop:
+                SET_ANSWER(ANS_STP_STOP);
+                break;
+        }
+    }
+}
 
 void req_set_gas()
 {
@@ -432,6 +470,8 @@ void comm_server_task()
     req_get_speed();
     req_get_slope();
     req_get_lit();
+    req_get_dis();
+    req_get_movement();
     req_set_gas();
     req_set_brake();
     req_set_mixer();
@@ -550,7 +590,7 @@ void setup()
 
 void loop()
 {
-    /*  unsigned long exe_end_time, delta;
+      unsigned long exe_end_time, delta;
     
     // execute tasks
     switch (sc) {
@@ -558,19 +598,25 @@ void loop()
             acceleration_task();
             brake_task();
             mixer_task();
+            read_potentiometer_task();
+            display_depo_dist_task();
             display_speed_task();
             read_slope_task();
             read_ldr_task();
-            lamps_task();                        
+            lamps_task();
+            read_button_task();                        
             break;
         case 1:
             acceleration_task();
             brake_task();
             mixer_task();
+            read_potentiometer_task();
+            display_depo_dist_task();
             display_speed_task();
             read_slope_task();
             read_ldr_task();
-            lamps_task();                        
+            lamps_task();         
+            read_button_task();               
             comm_server_task();
             break;
     }
@@ -592,8 +638,8 @@ void loop()
     delay(SC_TIME - delta + SC_REQUIRED_WAIT);
     exe_start_time += SC_TIME;
 
-    */
-    TIME_TASK( read_button_task() );
-    delay(100);
-    Serial.println(elapsed);
+    
+    //TIME_TASK( read_button_task() );
+    //delay(100);
+    //Serial.println(elapsed);
 }
