@@ -1,5 +1,5 @@
 //-Uncomment to compile with arduino support
-//#define ARDUINO
+// #define ARDUINO
 
 //-------------------------------------
 //-  Include files
@@ -24,7 +24,7 @@
 
 
 //-------------------------------------
-//-  Useful functions from displayB.c
+//-  Useful functions from displayA.c
 //-------------------------------------
 void diffTime(struct timespec end, struct timespec start, struct timespec *diff);
 void addTime(struct timespec end, struct timespec start, struct timespec *add);
@@ -34,10 +34,11 @@ int compTime(struct timespec t1, struct timespec t2);
 //-------------------------------------
 //-  Constants
 //-------------------------------------
-#define MSG_LEN                     9
-#define SLAVE_ADDR                  0x8
-#define MIXER_STATE_CHANGE_PERIOD   30      // mixer's state should change every this much
-#define LIGHT_SENSOR_DARK_THRESH    50      // threshold for light values considered as dark
+#define MSG_LEN                         9
+#define SLAVE_ADDR                      0x8
+#define MIXER_STATE_CHANGE_PERIOD       30      // mixer's state should change every this much
+#define LIGHT_SENSOR_DARK_THRESH        50      // threshold for light values considered as dark
+#define SPEED_REDUCTION_MIN_DISTANCE    11000   // minimum distance required to be able to stop the wagon safely in braking mode
 
 // Speed Control stuff
 #define NORMAL_AVG_SPEED            55.0F   // average speed to maintain in normal mode
@@ -46,8 +47,8 @@ int compTime(struct timespec t1, struct timespec t2);
 // Cyclic Scheduler stuff
 // number of secondary cycles per main cycle
 #define NORMAL_NUM_SC               2
-#define BRAKING_NUM_SC              2
-#define STOP_NUM_SC                 2
+#define BRAKING_NUM_SC              6
+#define STOP_NUM_SC                 3
 // secondary cycle time length
 #define NORMAL_SC_TIME              5
 #define BRAKING_SC_TIME             5
@@ -57,7 +58,7 @@ int compTime(struct timespec t1, struct timespec t2);
 // ------------------------------------
 // Operation Modes
 // ------------------------------------
-typedef enum{normal = 0, braking = 1, stop = 2} op_mode_t;
+typedef enum{normal, braking, stop} op_mode_t;
 
 
 //-------------------------------------
@@ -74,13 +75,12 @@ char brake_is_active = 0;
 char mixer_is_active = 0;
 char lamps_is_active = 0;
 int is_dark = 0;
-int depo_distance;
-int stopped = 0;
+int depo_distance = 90000;
+char stopped = 0;
 
 // times
 struct timespec mixer_state_change_last_time;
 struct timespec exe_start_time;
-
 
 
 // ------------------------------------
@@ -103,7 +103,7 @@ struct timespec exe_start_time;
 
 // Answers
 #define ANS_ERROR           "MSG: ERR\n"
-#define ANS_SPEED           "SPD:%04.1f\n"
+#define ANS_SPEED           "SPD:%f\n"
 #define ANS_SLOPE_FLAT      "SLP:FLAT\n"
 #define ANS_SLOPE_DOWN      "SLP:DOWN\n"
 #define ANS_SLOPE_UP        "SLP:  UP\n"
@@ -131,6 +131,13 @@ struct timespec exe_start_time;
 #define MAKE_REQUEST(req_buf, ans_buf, REQ) \
     strcpy(req_buf, REQ); \
     send_req_b(req_buf, ans_buf);
+
+// check whether we should change operation mode
+#define CHECK_OP_MODE_CHANGE(REQUIRED_COND, TARGET_MODE) \
+    if ((REQUIRED_COND)) { \
+        op_mode = TARGET_MODE; \
+        return; \
+    }
 
 
 // ------------------------------------
@@ -191,11 +198,6 @@ void braking_sched();
 void stop_sched();
 void *controller(void *arg);
 
-/*********** Switch Mode *************/
-void switch_to_braking();
-void switch_to_stop();
-void switch_to_normal();
-
 
 /********** Aux functions ************/
 int read_msg(int fd, char *buffer, int max_size)
@@ -218,10 +220,7 @@ int read_msg(int fd, char *buffer, int max_size)
         aux_buf[count] = char_aux;
 
         // increment count in a circular way
-        //TODO: refactor
-        //count = (count + 1) % MSG_LEN;
-        count = count + 1;
-        if (count == MSG_LEN) count = 0;
+        count = (count + 1) % MSG_LEN;
 
         // if character is new_line return answer
         if (char_aux == '\n') {
@@ -259,14 +258,10 @@ void task_get_speed()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
-
     MAKE_REQUEST(request, answer, REQ_SPEED);
-    // strcpy(request, REQ_SPEED);
-    // send_req_b(request, answer);
 
-    if (1 == sscanf(answer, ANS_SPEED, &speed)) {
+    if ( sscanf(answer, ANS_SPEED, &speed) == 1 )
         displaySpeed(speed);
-    }
 }
 
 
@@ -276,7 +271,6 @@ void task_get_slope()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
-
     MAKE_REQUEST(request, answer, REQ_SLOPE);
 
     // display slope
@@ -299,23 +293,20 @@ void task_set_gas()
 
     CLEAR_BUFFERS(request, answer);
 
-    if (speed > speed_target)
-        goto end;
-    // at this point, the wagon should speed up
-    /* NOTE: two calls might be needed to speed up completely
-    *  one call to turn off the brake, another to turn on the gas */
-    if (brake_is_active) {
-        MAKE_REQUEST(request, answer, REQ_BRK_CLR);
-        strcpy(request, REQ_BRK_CLR);
-        brake_is_active = 0;
+    if (speed > speed_target) {
+        // at this point, the wagon should slow down
+        if (gas_is_active) {
+            MAKE_REQUEST(request, answer, REQ_GAS_CLR);
+            gas_is_active = 0;
+        }
     } else {
-        strcpy(request, REQ_GAS_SET);
-        gas_is_active = 1;
+        // at this point, the wagon should speed up
+        if (!gas_is_active) {
+            MAKE_REQUEST(request, answer, REQ_GAS_SET);
+            gas_is_active = 1;
+        }
     }
 
-end:
-    // send request, get answer and display gas
-    send_req_b(request, answer);
     displayGas(gas_is_active);
 }
 
@@ -330,22 +321,20 @@ void task_set_brake()
 
     CLEAR_BUFFERS(request, answer);
 
-    if (speed <= speed_target)
-        goto end;
-    // at this point, the wagon should slow down
-    /* NOTE: two calls might be needed to slow down completely
-    *  one call to turn off the gas, another to turn on the brake */
-    if (gas_is_active) {
-        strcpy(request, REQ_GAS_CLR);
-        gas_is_active = 0;
+    if (speed > speed_target) {
+        // at this point, the wagon should slow down
+        if (!brake_is_active) {
+            MAKE_REQUEST(request, answer, REQ_BRK_SET);
+            brake_is_active = 1;
+        }
     } else {
-        strcpy(request, REQ_BRK_SET);
-        brake_is_active = 1;
+        // at this point, the wagon should speed up
+        if (brake_is_active) {
+            MAKE_REQUEST(request, answer, REQ_BRK_CLR);
+            brake_is_active = 0;
+        }
     }
 
-end:
-    // send request, get answer and display brake
-    send_req_b(request, answer);
     displayBrake(brake_is_active);
 }
 
@@ -366,23 +355,19 @@ void task_set_mixer()
 
     // check if 30 seconds have passed since the last state change
     if ( compTime(delta, mixer_state_change_period) < 0 )
-        goto end;
+        return;
     
     switch (mixer_is_active) {
         case 0:
+            MAKE_REQUEST(request, answer, REQ_MIX_SET);
             mixer_is_active = 1;
-            strcpy(request, REQ_MIX_SET);
             break;
         case 1:
+            MAKE_REQUEST(request, answer, REQ_MIX_CLR);
             mixer_is_active = 0;
-            strcpy(request, REQ_MIX_CLR);
             break;
     }
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
-
-end:
-    // send request, get answer and display mixer
-    send_req_b(request, answer);
     displayMix(mixer_is_active);
 }
 
@@ -394,12 +379,9 @@ void task_get_light()
     unsigned char light_value;
 
     CLEAR_BUFFERS(request, answer);
+    MAKE_REQUEST(request, answer, REQ_LIT);
 
-    // request light
-    strcpy(request, REQ_LIT);
-    send_req_b(request, answer);
-
-    if (1 == sscanf(answer, ANS_LIT, &light_value)) {
+    if ( sscanf(answer, ANS_LIT, &light_value) == 1 ) {
         is_dark = light_value < LIGHT_SENSOR_DARK_THRESH;
         displayLightSensor(is_dark);
     }
@@ -414,15 +396,13 @@ void task_set_lamps()
     CLEAR_BUFFERS(request, answer);
 
     if (is_dark) {
-        strcpy(request, REQ_LAM_SET);
+        MAKE_REQUEST(request, answer, REQ_LAM_SET);
         lamps_is_active = 1;
     } else {
-        strcpy(request, REQ_LAM_CLR);
+        MAKE_REQUEST(request, answer, REQ_LAM_CLR);
         lamps_is_active = 0;
     }
 
-    // send request, get answer and display lamps
-    send_req_b(request, answer);
     displayLamps(lamps_is_active);
 }
 
@@ -433,15 +413,11 @@ void task_get_distance()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
+    MAKE_REQUEST(request, answer, REQ_DISTANCE);
 
-    // request distance
-    strcpy(request, REQ_DISTANCE);
-    send_req_b(request, answer);
-
-    //TODO: will this work with Arduino in distance selection mode?
-    if (1 == sscanf(answer, ANS_DISTANCE, &depo_distance)) {
+    //TODO: will this work with Arduino in distance selection mode? Should work, let's see
+    if ( sscanf(answer, ANS_DISTANCE, &depo_distance) == 1 )
         displayDistance(depo_distance);
-    }
 }
 
 
@@ -451,16 +427,14 @@ void task_get_loading_sensor()
     char answer[MSG_LEN+1];
 
     CLEAR_BUFFERS(request, answer);
-
-    // request distance
-    strcpy(request, REQ_STOPPED);
-    send_req_b(request, answer);
+    MAKE_REQUEST(request, answer, REQ_STOPPED);
 
     // display wagon movement state
     if ( !strcmp(answer, ANS_STOPPED_GO) )
         stopped = 0;
     if ( !strcmp(answer, ANS_STOPPED_STOP) )
         stopped = 1;
+
     displayStop(stopped);
 }
 
@@ -472,7 +446,6 @@ void normal_sched()
     struct timespec exe_end_time, delta;
     struct timespec sc_time, wait_time;
     sc_time.tv_sec = NORMAL_SC_TIME;
-    unsigned char change_to_braking_mode = 0;
     
     while (1) {
         // execute tasks
@@ -506,11 +479,7 @@ void normal_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        // check whether we should change operation modes
-        if (change_to_braking_mode) {
-            op_mode = braking;
-            return;
-        }
+        CHECK_OP_MODE_CHANGE(depo_distance < SPEED_REDUCTION_MIN_DISTANCE, braking);
     }
 }
 
@@ -521,7 +490,6 @@ void braking_sched()
     struct timespec exe_end_time, delta;
     struct timespec sc_time, wait_time;
     sc_time.tv_sec = BRAKING_SC_TIME;
-    unsigned char change_to_stop_mode = 0;
 
     // lamps always on
     is_dark = 1;
@@ -530,15 +498,44 @@ void braking_sched()
         // execute tasks
         switch (sc) {
             case 0:
-                task_set_lamps();
                 task_get_speed();
-                task_get_slope();
                 task_set_gas();
-                break;
-            case 1:
-                task_set_lamps();
                 task_set_brake();
                 task_set_mixer();
+                task_get_distance();
+                break;
+            case 1:
+                task_get_speed();
+                task_set_gas();
+                task_set_brake();
+                task_get_slope();
+                task_set_lamps();
+                break;
+            case 2:
+                task_get_speed();
+                task_set_gas();
+                task_set_brake();
+                task_set_mixer();
+                task_get_distance();
+                break;
+            case 3:
+                task_get_speed();
+                task_set_gas();
+                task_set_brake();
+                task_get_slope();
+                break;
+            case 4:
+                task_get_speed();
+                task_set_gas();
+                task_set_brake();
+                task_set_mixer();
+                task_get_distance();
+                break;
+            case 5:
+                task_get_speed();
+                task_set_gas();
+                task_set_brake();
+                task_get_slope();
                 break;
         }
 
@@ -555,11 +552,7 @@ void braking_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        // check whether we should change operation modes
-        if (change_to_stop_mode) {
-            op_mode = stop;
-            return;
-        }
+        CHECK_OP_MODE_CHANGE(depo_distance == 0 && speed < 10, stop);
     }
 }
 
@@ -570,26 +563,27 @@ void stop_sched()
     struct timespec exe_end_time, delta;
     struct timespec sc_time, wait_time;
     sc_time.tv_sec = STOP_SC_TIME;
-    unsigned char change_to_normal_mode = 0;
     
     // lamps always on
     is_dark = 1;
 
     while (1) {
+    fprintf(stderr, "\n\n\nSTOP MODE REACHED\tSTOP MODE REACHED\tSTOP MODE REACHED\n\n\n");
+    displayStop(1);
         // execute tasks
         switch (sc) {
             case 0:
-                task_get_light();
                 task_set_lamps();
-                task_get_speed();
-                task_get_slope();
-                task_set_gas();
+                // task_get_loading_sensor();
+                task_set_mixer();
                 break;
             case 1:
-                task_get_light();
                 task_set_lamps();
-                task_set_brake();
-                task_set_mixer();
+                // task_get_loading_sensor();
+                break;
+            case 2:
+                task_set_lamps();
+                // task_get_loading_sensor();
                 break;
         }
 
@@ -606,17 +600,19 @@ void stop_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        // check whether we should change operation modes
-        if (change_to_normal_mode) {
-            op_mode = normal;
-            return;
-        }
+        CHECK_OP_MODE_CHANGE(stopped == 0, normal);
     }
 }
 
 
 void *controller(void *arg)
 {
+#if defined(ARDUINO)
+    // wait for comms to be set up
+    // NOTE: QEMU can't talk to Arduino over serial device without this
+    sleep(1);
+#endif
+
     // setup initial times
     clock_gettime(CLOCK_REALTIME, &exe_start_time);
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
@@ -636,25 +632,6 @@ void *controller(void *arg)
     }
 
     return (0);
-}
-
-
-/*********** Switch Mode *************/
-void switch_to_braking()
-{
-
-}
-
-
-void switch_to_stop()
-{
-
-}
-
-
-void switch_to_normal()
-{
-
 }
 
 

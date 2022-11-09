@@ -368,15 +368,15 @@ void *controller(void *arg)
     struct timespec sc_time, wait_time;
     sc_time.tv_sec = SC_TIME;
     
+#if defined(ARDUINO)
+    // wait for comms to be set up
+    // NOTE: QEMU might not be able to talk to Arduino over serial device without this
+    sleep(1);
+#endif
+
     // setup initial times
     clock_gettime(CLOCK_REALTIME, &exe_start_time);
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
-
-#if defined(ARDUINO)
-    // wait for comms to be set up
-    // NOTE: QEMU can't talk to Arduino over serial device without this
-    sleep(1);
-#endif
 
     while(1) {
         // execute tasks
