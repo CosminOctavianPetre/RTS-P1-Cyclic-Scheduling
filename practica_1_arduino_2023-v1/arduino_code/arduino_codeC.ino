@@ -49,9 +49,9 @@ typedef enum{flat = 0, down = 1, up = 2} slope_t;
 
 
 // ------------------------------------
-// Movement Legal Values
+// Mode Values
 // ------------------------------------
-typedef enum{go = 0, stop = 1} movement_t;
+typedef enum{selection_mode = 0, approach_mode = 1, stop_mode = 2} mode_t;
 
 
 // ------------------------------------
@@ -159,13 +159,16 @@ unsigned char ldr_value = 0;
 unsigned long depo_distance = 10000;
 unsigned long actual_distance = 0;
 char old_value_button = 0;
-movement_t movement = go;
+mode_t mode = selection_mode;
 
 unsigned long speed_last_measure_time;
+unsigned long position_last_measure_time;
 
 // Scheduler stuff
 unsigned char sc = 0; // secondary cycle
 unsigned long exe_start_time;
+unsigned long exe_end_time, delta;
+
 
 
 // ------------------------------------
@@ -396,11 +399,14 @@ void req_get_movement()
     // check request
     if ( !strcmp(REQ_STP, request) ) {
         // set answer according to current slope
-        switch (movement) {
-            case go:
+        switch (mode) {
+            case selection_mode:
                 SET_ANSWER(ANS_STP_GO);
                 break;
-            case stop:
+            case approach_mode:
+                SET_ANSWER(ANS_STP_GO);
+                break;            
+            case stop_mode:
                 SET_ANSWER(ANS_STP_STOP);
                 break;
         }
@@ -508,8 +514,11 @@ void display_speed_task()
     unsigned char speed_led_pwm_value;
 
     // compute new speed first
-    update_speed();
-
+    if (mode != stop_mode){
+        update_speed();
+    }else{
+        speed = 0;      
+    }
     // change speed LED intensity
     // if speed is out of bounds, the LED turns off
     if ( speed != constrain(speed, SPEED_MIN, SPEED_MAX) )
@@ -522,9 +531,28 @@ void display_speed_task()
 
 
 void display_depo_dist_task()
-{
-    unsigned char display_digit = (unsigned char) (depo_distance/10000);
-    set_7seg_display(display_digit);
+{   if (mode == selection_mode){
+        unsigned char display_digit = (unsigned char) (depo_distance/10000);
+        set_7seg_display(display_digit);
+    }else if(mode == approach_mode){
+        unsigned long delta, position_new_measure_time;
+        if (position_last_measure_time > position_new_measure_time)
+            delta = MAX_UNSIGNED_LONG - position_last_measure_time + position_new_measure_time;
+        else
+            delta = position_new_measure_time - position_last_measure_time;
+
+        position_last_measure_time = position_new_measure_time;
+        actual_distance -= (double) speed * ((double) delta/us);
+        if (actual_distance<=10 && speed < 10){
+            Serial.println("Change mode to stop");
+            mode = stop_mode;            
+        }else if(actual_distance<=10 && speed > 10){
+            Serial.println("Change mode to selection");
+            mode = selection_mode;
+        }
+    }else if(mode == stop_mode){
+        set_7seg_display((unsigned char)0);
+    }
 }
 
 
@@ -554,10 +582,169 @@ void read_button_task()
 {
     int value = digitalRead(PUSH_BUTTON);
     if ((old_value_button == 0) && (value == 1)){
-        actual_distance = depo_distance;
-        Serial.println(actual_distance);
+        if (mode==selection_mode){
+            actual_distance = depo_distance;
+            mode = approach_mode;
+        }else if (mode == stop_mode){
+            mode = selection_mode;        
+        }else if (mode == approach_mode){
+            Serial.println("Dentro approach mode");
+        }                    
     }
     old_value_button = value;
+}
+
+void selection_scheduler(){    
+    // execute tasks
+    switch (sc) {
+        case 0:
+            acceleration_task();
+            brake_task();
+            mixer_task();
+            read_potentiometer_task();
+            display_depo_dist_task();
+            display_speed_task();
+            read_slope_task();
+            read_ldr_task();
+            lamps_task();
+            read_button_task();                        
+            break;
+        case 1:
+            acceleration_task();
+            brake_task();
+            mixer_task();
+            read_potentiometer_task();
+            display_depo_dist_task();
+            display_speed_task();
+            read_slope_task();
+            read_ldr_task();
+            lamps_task();         
+            read_button_task();               
+            comm_server_task();
+            break;
+    }
+
+    sc = (sc + 1) % NUM_SC;
+    exe_end_time = millis();
+
+    // get elapsed execution time
+    if (exe_start_time > exe_end_time)
+        delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
+    else
+        delta = (unsigned long) (exe_end_time - exe_start_time);
+
+    // panic: execution took too long
+    if (SC_TIME < delta)
+        exit(-1);
+
+    // wait until next secondary cycle
+    delay(SC_TIME - delta + SC_REQUIRED_WAIT);
+    exe_start_time += SC_TIME;
+    if (mode == approach_mode){
+      Serial.println("Change mode to approach");
+      position_last_measure_time = micros();      
+      return;
+    }
+    
+}
+
+void approach_scheduler(){
+    switch (sc) {
+            case 0:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                display_depo_dist_task();
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();
+                read_button_task();                        
+                break;
+            case 1:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                display_depo_dist_task();
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();         
+                read_button_task();               
+                comm_server_task();
+                break;
+        }
+
+        sc = (sc + 1) % NUM_SC;
+        exe_end_time = millis();
+
+        // get elapsed execution time
+        if (exe_start_time > exe_end_time)
+            delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
+        else
+            delta = (unsigned long) (exe_end_time - exe_start_time);
+
+        // panic: execution took too long
+        if (SC_TIME < delta)
+            exit(-1);
+
+        // wait until next secondary cycle
+        delay(SC_TIME - delta + SC_REQUIRED_WAIT);
+        exe_start_time += SC_TIME;
+        if(mode != approach_mode){
+          Serial.println("End approach");
+          return;
+        }
+}
+void stop_scheduler(){
+    switch (sc) {
+            case 0:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                read_potentiometer_task();
+                display_depo_dist_task();
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();
+                read_button_task();                        
+                break;
+            case 1:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                read_potentiometer_task();
+                display_depo_dist_task();
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();         
+                read_button_task();               
+                comm_server_task();
+                break;
+        }
+
+        sc = (sc + 1) % NUM_SC;
+        exe_end_time = millis();
+
+        // get elapsed execution time
+        if (exe_start_time > exe_end_time)
+            delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
+        else
+            delta = (unsigned long) (exe_end_time - exe_start_time);
+
+        // panic: execution took too long
+        if (SC_TIME < delta)
+            exit(-1);
+
+        // wait until next secondary cycle
+        delay(SC_TIME - delta + SC_REQUIRED_WAIT);
+        exe_start_time += SC_TIME;
+        if(mode == selection_mode){
+          Serial.println("End stop");
+          return;
+        }  
 }
 
 
@@ -587,10 +774,25 @@ void setup()
     exe_start_time = millis();
 }
 
-
-void loop()
+void loop(){
+  while (1){
+    switch(mode){
+      case selection_mode:
+        selection_scheduler();
+        break;
+      case approach_mode:
+        approach_scheduler();
+        break;
+      case stop_mode:
+        stop_scheduler();
+        break;
+      
+    }
+  }
+}
+/*void loop()
 {
-      unsigned long exe_end_time, delta;
+    unsigned long exe_end_time, delta;
     
     // execute tasks
     switch (sc) {
@@ -642,4 +844,4 @@ void loop()
     //TIME_TASK( read_button_task() );
     //delay(100);
     //Serial.println(elapsed);
-}
+}*/
