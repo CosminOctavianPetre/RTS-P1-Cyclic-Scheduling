@@ -110,7 +110,7 @@ typedef enum{selection_mode = 0, approach_mode = 1, stop_mode = 2} mode_t;
 #define ANS_LAM_OK      "LAM:  OK\n"
 #define ANS_STP_GO      "STP:  GO\n"
 #define ANS_STP_STOP    "STP:STOP\n"
-#define ANS_DIS         "DS:%.5d%\n"
+#define ANS_DIS         "DS:%.5ld\n"
 
 
 
@@ -131,7 +131,6 @@ typedef enum{selection_mode = 0, approach_mode = 1, stop_mode = 2} mode_t;
 
 // used to get task compute time
 #define TIME_TASK(TASK) \
-    unsigned long time_exec_begin, time_exec_end, elapsed; \
     time_exec_begin = micros(); \
     (TASK); \
     time_exec_end = micros(); \
@@ -157,7 +156,7 @@ double speed = 55.5;
 slope_t railway_slope = flat;
 unsigned char ldr_value = 0;
 unsigned long depo_distance = 10000;
-unsigned long actual_distance = 0;
+signed long actual_distance = 0;
 char old_value_button = 0;
 mode_t mode = selection_mode;
 
@@ -219,7 +218,7 @@ void read_slope_task();
 void read_ldr_task();
 // ------------------------------------
 // Task: Compute distance digit and show it 
-// Worst Compute Time: 64 μs
+// Worst Compute Time: 128 μs
 // ------------------------------------
 void display_depo_dist_task();
 // ------------------------------------
@@ -229,7 +228,7 @@ void display_depo_dist_task();
 void read_potentiometer_task();
 // ------------------------------------
 // Task: Read button and take actual distance
-// Worst Compute Time: 264 μs
+// Worst Compute Time: 16 μs
 // ------------------------------------
 void read_button_task();
 
@@ -476,7 +475,9 @@ void comm_server_task()
     req_get_speed();
     req_get_slope();
     req_get_lit();
-    req_get_dis();
+    if (mode != selection_mode){
+        req_get_dis();
+    }
     req_get_movement();
     req_set_gas();
     req_set_brake();
@@ -530,28 +531,27 @@ void display_speed_task()
 }
 
 
-void display_depo_dist_task()
-{   if (mode == selection_mode){
+void display_depo_dist_task(){
+    if (mode == selection_mode){
         unsigned char display_digit = (unsigned char) (depo_distance/10000);
         set_7seg_display(display_digit);
     }else if(mode == approach_mode){
         unsigned long delta, position_new_measure_time;
+        position_new_measure_time = micros();
         if (position_last_measure_time > position_new_measure_time)
             delta = MAX_UNSIGNED_LONG - position_last_measure_time + position_new_measure_time;
         else
             delta = position_new_measure_time - position_last_measure_time;
-
         position_last_measure_time = position_new_measure_time;
-        actual_distance -= (double) speed * ((double) delta/us);
-        if (actual_distance<=10 && speed < 10){
-            Serial.println("Change mode to stop");
+        actual_distance -= (signed long)((double) speed * ((double) delta/us));
+        unsigned char display_digit = (unsigned char) (actual_distance/10000);
+        set_7seg_display(display_digit);        
+        if (actual_distance<=0 && speed < 10){
+            actual_distance = 0;
             mode = stop_mode;            
-        }else if(actual_distance<=10 && speed > 10){
-            Serial.println("Change mode to selection");
+        }else if(actual_distance<=0 && speed > 10){
             mode = selection_mode;
         }
-    }else if(mode == stop_mode){
-        set_7seg_display((unsigned char)0);
     }
 }
 
@@ -583,12 +583,10 @@ void read_button_task()
     int value = digitalRead(PUSH_BUTTON);
     if ((old_value_button == 0) && (value == 1)){
         if (mode==selection_mode){
-            actual_distance = depo_distance;
+            actual_distance = (signed long) depo_distance;
             mode = approach_mode;
         }else if (mode == stop_mode){
             mode = selection_mode;        
-        }else if (mode == approach_mode){
-            Serial.println("Dentro approach mode");
         }                    
     }
     old_value_button = value;
@@ -602,12 +600,12 @@ void selection_scheduler(){
             brake_task();
             mixer_task();
             read_potentiometer_task();
-            display_depo_dist_task();
+            display_depo_dist_task();   
             display_speed_task();
             read_slope_task();
             read_ldr_task();
             lamps_task();
-            read_button_task();                        
+            read_button_task();
             break;
         case 1:
             acceleration_task();
@@ -618,9 +616,9 @@ void selection_scheduler(){
             display_speed_task();
             read_slope_task();
             read_ldr_task();
-            lamps_task();         
-            read_button_task();               
-            comm_server_task();
+            lamps_task();    
+            read_button_task();     
+            comm_server_task();              
             break;
     }
 
@@ -637,15 +635,15 @@ void selection_scheduler(){
     if (SC_TIME < delta)
         exit(-1);
 
-    // wait until next secondary cycle
-    delay(SC_TIME - delta + SC_REQUIRED_WAIT);
-    exe_start_time += SC_TIME;
-    if (mode == approach_mode){
-      Serial.println("Change mode to approach");
+    if (mode != selection_mode){
       position_last_measure_time = micros();      
       return;
     }
-    
+
+    // wait until next secondary cycle
+    delay(SC_TIME - delta + SC_REQUIRED_WAIT);
+    exe_start_time += SC_TIME;
+
 }
 
 void approach_scheduler(){
@@ -659,7 +657,6 @@ void approach_scheduler(){
                 read_slope_task();
                 read_ldr_task();
                 lamps_task();
-                read_button_task();                        
                 break;
             case 1:
                 acceleration_task();
@@ -670,8 +667,7 @@ void approach_scheduler(){
                 read_slope_task();
                 read_ldr_task();
                 lamps_task();         
-                read_button_task();               
-                comm_server_task();
+                comm_server_task(); 
                 break;
         }
 
@@ -688,13 +684,14 @@ void approach_scheduler(){
         if (SC_TIME < delta)
             exit(-1);
 
+        if(mode != approach_mode){
+          return;
+        }
+
         // wait until next secondary cycle
         delay(SC_TIME - delta + SC_REQUIRED_WAIT);
         exe_start_time += SC_TIME;
-        if(mode != approach_mode){
-          Serial.println("End approach");
-          return;
-        }
+
 }
 void stop_scheduler(){
     switch (sc) {
@@ -702,8 +699,6 @@ void stop_scheduler(){
                 acceleration_task();
                 brake_task();
                 mixer_task();
-                read_potentiometer_task();
-                display_depo_dist_task();
                 display_speed_task();
                 read_slope_task();
                 read_ldr_task();
@@ -714,14 +709,12 @@ void stop_scheduler(){
                 acceleration_task();
                 brake_task();
                 mixer_task();
-                read_potentiometer_task();
-                display_depo_dist_task();
                 display_speed_task();
                 read_slope_task();
                 read_ldr_task();
                 lamps_task();         
-                read_button_task();               
-                comm_server_task();
+                read_button_task();
+                comm_server_task();       
                 break;
         }
 
@@ -738,13 +731,16 @@ void stop_scheduler(){
         if (SC_TIME < delta)
             exit(-1);
 
+        if(mode != stop_mode){
+          //Time updated so the speed starts from 0
+          speed_last_measure_time = micros();
+          return;
+        }  
+        
         // wait until next secondary cycle
         delay(SC_TIME - delta + SC_REQUIRED_WAIT);
         exe_start_time += SC_TIME;
-        if(mode == selection_mode){
-          Serial.println("End stop");
-          return;
-        }  
+
 }
 
 
@@ -769,6 +765,7 @@ void setup()
 
     // set initial speed measure time
     speed_last_measure_time = micros();
+    
 
     // set initial execution start time
     exe_start_time = millis();
