@@ -1,5 +1,5 @@
 //-Uncomment to compile with arduino support
-// #define ARDUINO
+#define ARDUINO
 
 //-------------------------------------
 //-  Include files
@@ -42,23 +42,26 @@ int compTime(struct timespec t1, struct timespec t2);
 
 // Speed Control stuff
 #define NORMAL_AVG_SPEED            55.0F   // average speed to maintain in normal mode
-#define BRAKING_AVG_SPEED           2.5F    // speed threshold to enter stop mode
+#define BRAKING_AVG_SPEED           2.5F    // average speed to maintain in braking mode
+#define BRAKING_AVG_SPEED_EXP       4.0F    // average speed to maintain in braking mode
 
 // Cyclic Scheduler stuff
 // number of secondary cycles per main cycle
 #define NORMAL_NUM_SC               2
 #define BRAKING_NUM_SC              6
+#define BRAKING_NUM_SC_EXP          6
 #define STOP_NUM_SC                 3
 // secondary cycle time length
 #define NORMAL_SC_TIME              5
 #define BRAKING_SC_TIME             5
+#define BRAKING_SC_TIME_EXP         5
 #define STOP_SC_TIME                5
 
 
 // ------------------------------------
 // Operation Modes
 // ------------------------------------
-typedef enum{normal, braking, stop} op_mode_t;
+typedef enum{normal_mode, braking_mode, stop_mode} op_mode_t;
 
 
 //-------------------------------------
@@ -66,7 +69,7 @@ typedef enum{normal, braking, stop} op_mode_t;
 //-------------------------------------
 struct timespec time_msg = {0, 400000000};
 int fd_serie = -1;
-op_mode_t op_mode = normal;
+op_mode_t op_mode = normal_mode;
 
 // Sensors and states
 float speed = 0.0F;
@@ -80,7 +83,6 @@ char stopped = 0;
 
 // times
 struct timespec mixer_state_change_last_time;
-struct timespec exe_start_time;
 
 
 // ------------------------------------
@@ -289,7 +291,7 @@ void task_set_gas()
     char answer[MSG_LEN+1];
     // in normal mode we should maintain an average speed
     // in braking mode we should slow down until we reach the stopping speed
-    float speed_target = (float) (op_mode == normal)*NORMAL_AVG_SPEED + (float) (op_mode == braking)*BRAKING_AVG_SPEED;
+    float speed_target = (float) (op_mode == normal_mode)*NORMAL_AVG_SPEED + (float) (op_mode == braking_mode)*BRAKING_AVG_SPEED;
 
     CLEAR_BUFFERS(request, answer);
 
@@ -317,7 +319,7 @@ void task_set_brake()
     char answer[MSG_LEN+1];
     // in normal mode we should maintain an average speed
     // in braking mode we should slow down until we reach the stopping speed
-    float speed_target = (float) (op_mode == normal)*NORMAL_AVG_SPEED + (float) (op_mode == braking)*BRAKING_AVG_SPEED;
+    float speed_target = (float) (op_mode == normal_mode)*NORMAL_AVG_SPEED + (float) (op_mode == braking_mode)*BRAKING_AVG_SPEED;
 
     CLEAR_BUFFERS(request, answer);
 
@@ -395,14 +397,20 @@ void task_set_lamps()
 
     CLEAR_BUFFERS(request, answer);
 
-    if (is_dark) {
-        MAKE_REQUEST(request, answer, REQ_LAM_SET);
-        lamps_is_active = 1;
-    } else {
-        MAKE_REQUEST(request, answer, REQ_LAM_CLR);
-        lamps_is_active = 0;
-    }
+    // lamps state is already correct: nothing to do
+    if (is_dark == lamps_is_active)
+        return;
 
+    // change lamps state
+    switch (is_dark) {
+        case 1:
+            MAKE_REQUEST(request, answer, REQ_LAM_SET);
+            break;
+        case 0:
+            MAKE_REQUEST(request, answer, REQ_LAM_CLR);
+            break;
+    }
+    lamps_is_active = is_dark;
     displayLamps(lamps_is_active);
 }
 
@@ -443,9 +451,12 @@ void task_get_loading_sensor()
 void normal_sched()
 {
     unsigned char sc = 0;   // secondary cycle
-    struct timespec exe_end_time, delta;
+    struct timespec exe_start_time, exe_end_time, delta;
     struct timespec sc_time, wait_time;
+    
+    // setup times
     sc_time.tv_sec = NORMAL_SC_TIME;
+    clock_gettime(CLOCK_REALTIME, &exe_start_time);
     
     while (1) {
         // execute tasks
@@ -479,7 +490,7 @@ void normal_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        CHECK_OP_MODE_CHANGE(depo_distance < SPEED_REDUCTION_MIN_DISTANCE, braking);
+        CHECK_OP_MODE_CHANGE(depo_distance < SPEED_REDUCTION_MIN_DISTANCE, braking_mode);
     }
 }
 
@@ -487,9 +498,12 @@ void normal_sched()
 void braking_sched()
 {
     unsigned char sc = 0;   // secondary cycle
-    struct timespec exe_end_time, delta;
+    struct timespec exe_start_time, exe_end_time, delta;
     struct timespec sc_time, wait_time;
+    
+    // setup times
     sc_time.tv_sec = BRAKING_SC_TIME;
+    clock_gettime(CLOCK_REALTIME, &exe_start_time);
 
     // lamps always on
     is_dark = 1;
@@ -552,7 +566,7 @@ void braking_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        CHECK_OP_MODE_CHANGE(depo_distance == 0 && speed < 10, stop);
+        CHECK_OP_MODE_CHANGE(depo_distance == 0 && speed < 10, stop_mode);
     }
 }
 
@@ -560,30 +574,33 @@ void braking_sched()
 void stop_sched()
 {
     unsigned char sc = 0;   // secondary cycle
-    struct timespec exe_end_time, delta;
+    struct timespec exe_start_time, exe_end_time, delta;
     struct timespec sc_time, wait_time;
+
+    // setup times
     sc_time.tv_sec = STOP_SC_TIME;
+    clock_gettime(CLOCK_REALTIME, &exe_start_time);
     
     // lamps always on
     is_dark = 1;
 
     while (1) {
-    fprintf(stderr, "\n\n\nSTOP MODE REACHED\tSTOP MODE REACHED\tSTOP MODE REACHED\n\n\n");
-    displayStop(1);
+    // fprintf(stderr, "\n\n\nSTOP MODE REACHED\tSTOP MODE REACHED\tSTOP MODE REACHED\n\n\n");
+    // displayStop(1);
         // execute tasks
         switch (sc) {
             case 0:
                 task_set_lamps();
-                // task_get_loading_sensor();
+                task_get_loading_sensor();
                 task_set_mixer();
                 break;
             case 1:
                 task_set_lamps();
-                // task_get_loading_sensor();
+                task_get_loading_sensor();
                 break;
             case 2:
                 task_set_lamps();
-                // task_get_loading_sensor();
+                task_get_loading_sensor();
                 break;
         }
 
@@ -600,7 +617,7 @@ void stop_sched()
         nanosleep(&wait_time, NULL);
         addTime(exe_start_time, sc_time, &exe_start_time);
 
-        CHECK_OP_MODE_CHANGE(stopped == 0, normal);
+        CHECK_OP_MODE_CHANGE(stopped == 0, normal_mode);
     }
 }
 
@@ -614,18 +631,17 @@ void *controller(void *arg)
 #endif
 
     // setup initial times
-    clock_gettime(CLOCK_REALTIME, &exe_start_time);
     clock_gettime(CLOCK_REALTIME, &mixer_state_change_last_time);
 
     while (1) {
         switch (op_mode) {
-            case normal:
+            case normal_mode:
                 normal_sched();
                 break;
-            case braking:
+            case braking_mode:
                 braking_sched();
                 break;
-            case stop:
+            case stop_mode:
                 stop_sched();
                 break;
         }

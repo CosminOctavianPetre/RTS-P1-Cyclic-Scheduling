@@ -348,14 +348,20 @@ void task_set_lamps()
 
     CLEAR_BUFFERS(request, answer);
 
-    if (is_dark) {
-        MAKE_REQUEST(request, answer, REQ_LAM_SET);
-        lamps_is_active = 1;
-    } else {
-        MAKE_REQUEST(request, answer, REQ_LAM_CLR);
-        lamps_is_active = 0;
-    }
+    // lamps state is already correct: nothing to do
+    if (is_dark == lamps_is_active)
+        return;
 
+    // change lamps state
+    switch (is_dark) {
+        case 1:
+            MAKE_REQUEST(request, answer, REQ_LAM_SET);
+            break;
+        case 0:
+            MAKE_REQUEST(request, answer, REQ_LAM_CLR);
+            break;
+    }
+    lamps_is_active = is_dark;
     displayLamps(lamps_is_active);
 }
 
