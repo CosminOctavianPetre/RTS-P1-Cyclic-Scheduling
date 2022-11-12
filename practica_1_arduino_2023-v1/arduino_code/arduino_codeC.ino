@@ -11,11 +11,19 @@
 #define SLAVE_ADDR          0x8
 #define MESSAGE_SIZE        8+2             // useful message size + required overhead ("/n", "/0")
 #define MAX_UNSIGNED_LONG   0xffffffffUL
-#define us                  1000000UL       // number of microsenconds in a second
+#define us                  1000000.0       // number of microsenconds in a second
+
 // Cyclic Scheduler stuff
-#define NUM_SC              2               // number of secondary cycles per main cycle
-#define SC_TIME             100UL           // secondary cycle time length
 #define SC_REQUIRED_WAIT    5UL             // required time to wait for next secondary cycle
+// number of secondary cycles per main cycle
+#define DIST_SEL_NUM_SC     2
+#define APPROACH_NUM_SC     2
+#define STOP_NUM_SC         2
+// secondary cycle time length
+#define DIST_SEL_SC_TIME    100UL
+#define APPROACH_SC_TIME    100UL
+#define STOP_SC_TIME        100UL
+
 
 
 // ------------------------------------
@@ -45,13 +53,13 @@
 // ------------------------------------
 // Slope Legal Values
 // ------------------------------------
-typedef enum{flat = 0, down = 1, up = 2} slope_t;
+typedef enum{flat, down, up} slope_t;
 
 
 // ------------------------------------
-// Mode Values
+// Operation Mode Values
 // ------------------------------------
-typedef enum{selection_mode = 0, approach_mode = 1, stop_mode = 2} mode_t;
+typedef enum{selection_mode, approach_mode, stop_mode} mode_t;
 
 
 // ------------------------------------
@@ -113,7 +121,6 @@ typedef enum{selection_mode = 0, approach_mode = 1, stop_mode = 2} mode_t;
 #define ANS_DIS         "DS:%.5ld\n"
 
 
-
 // ------------------------------------
 // Macros
 // ------------------------------------
@@ -156,18 +163,12 @@ double speed = 55.5;
 slope_t railway_slope = flat;
 unsigned char ldr_value = 0;
 unsigned long depo_distance = 10000;
-signed long actual_distance = 0;
+long actual_distance = 0;
 char old_value_button = 0;
 mode_t mode = selection_mode;
 
 unsigned long speed_last_measure_time;
-unsigned long position_last_measure_time;
-
-// Scheduler stuff
-unsigned char sc = 0; // secondary cycle
-unsigned long exe_start_time;
-unsigned long exe_end_time, delta;
-
+unsigned long distance_last_measure_time;
 
 
 // ------------------------------------
@@ -275,6 +276,11 @@ void update_speed()
     unsigned long speed_new_measure_time, delta;
     double acceleration;
 
+    if (mode == stop_mode) {
+        speed = 0;
+        return;
+    }
+
     speed_new_measure_time = micros();
 
     // get elapsed time between speed measurements
@@ -288,7 +294,7 @@ void update_speed()
     acceleration = MOD_GAS*gas_is_active + MOD_BRK*brake_is_active +
     MOD_SLOPE_DOWN*(railway_slope == down) + MOD_SLOPE_UP*(railway_slope == up);
 
-    speed += (double) acceleration * ((double) delta/us);
+    speed += acceleration * ((double) delta/us);
 }
 
 
@@ -349,7 +355,10 @@ void req_get_speed()
     if ( !strcmp(REQ_SPEED, request) ) {  
         // convert double to string
         char num_str[5];
-        dtostrf(speed, 4,1, num_str);
+        dtostrf(speed, 4, 1, num_str);
+        // add a 0 if speed < 10
+        if (num_str[0] == ' ')
+            num_str[0] = '0';
 
         SET_ANSWER(ANS_SPEED, num_str);
     }
@@ -384,6 +393,7 @@ void req_get_lit()
     }
 }
 
+
 void req_get_dis()
 { 
     // check request
@@ -397,7 +407,7 @@ void req_get_movement()
 {
     // check request
     if ( !strcmp(REQ_STP, request) ) {
-        // set answer according to current slope
+        // set answer according to current op mode
         switch (mode) {
             case selection_mode:
                 SET_ANSWER(ANS_STP_GO);
@@ -411,6 +421,7 @@ void req_get_movement()
         }
     }
 }
+
 
 void req_set_gas()
 {
@@ -475,14 +486,13 @@ void comm_server_task()
     req_get_speed();
     req_get_slope();
     req_get_lit();
-    if (mode != selection_mode){
-        req_get_dis();
-    }
-    req_get_movement();
     req_set_gas();
     req_set_brake();
     req_set_mixer();
     req_set_lamps();
+    req_get_movement();
+    if (mode != selection_mode)
+        req_get_dis();
 }
 
 
@@ -515,11 +525,8 @@ void display_speed_task()
     unsigned char speed_led_pwm_value;
 
     // compute new speed first
-    if (mode != stop_mode){
-        update_speed();
-    }else{
-        speed = 0;      
-    }
+    update_speed();
+
     // change speed LED intensity
     // if speed is out of bounds, the LED turns off
     if ( speed != constrain(speed, SPEED_MIN, SPEED_MAX) )
@@ -531,27 +538,38 @@ void display_speed_task()
 }
 
 
-void display_depo_dist_task(){
-    if (mode == selection_mode){
-        unsigned char display_digit = (unsigned char) (depo_distance/10000);
-        set_7seg_display(display_digit);
-    }else if(mode == approach_mode){
-        unsigned long delta, position_new_measure_time;
-        position_new_measure_time = micros();
-        if (position_last_measure_time > position_new_measure_time)
-            delta = MAX_UNSIGNED_LONG - position_last_measure_time + position_new_measure_time;
-        else
-            delta = position_new_measure_time - position_last_measure_time;
-        position_last_measure_time = position_new_measure_time;
-        actual_distance -= (signed long)((double) speed * ((double) delta/us));
-        unsigned char display_digit = (unsigned char) (actual_distance/10000);
-        set_7seg_display(display_digit);        
-        if (actual_distance<=0 && speed < 10){
-            actual_distance = 0;
-            mode = stop_mode;            
-        }else if(actual_distance<=0 && speed > 10){
-            mode = selection_mode;
-        }
+void display_depo_dist_task()
+{
+    unsigned long delta, distance_new_measure_time;
+    double actual_distance_tmp = (double) actual_distance;
+
+    switch (mode) {
+        case selection_mode:
+            set_7seg_display((unsigned char) (depo_distance/10000));
+            break;
+        case approach_mode:
+            distance_new_measure_time = micros();
+
+            // get elapsed time between distance measurements
+            if (distance_last_measure_time > distance_new_measure_time)
+                delta = MAX_UNSIGNED_LONG - distance_last_measure_time + distance_new_measure_time;
+            else
+                delta = distance_new_measure_time - distance_last_measure_time;
+
+            distance_last_measure_time = distance_new_measure_time;
+            actual_distance_tmp -= speed * (double) delta/us;
+            actual_distance = (long) actual_distance_tmp;
+
+            set_7seg_display((unsigned char) (actual_distance/10000));   
+
+            if (actual_distance <= 0 && speed < 10) {
+                actual_distance = 0;
+                mode = stop_mode;            
+            } else if (actual_distance <= 0 && speed > 10)
+                mode = selection_mode;
+            break;
+        default:
+            break;
     }
 }
 
@@ -581,73 +599,91 @@ void read_potentiometer_task()
 void read_button_task()
 {
     int value = digitalRead(PUSH_BUTTON);
-    if ((old_value_button == 0) && (value == 1)){
-        if (mode==selection_mode){
+    if ( (old_value_button == 0) && (value == 1) ) {
+        if (mode == selection_mode){
             actual_distance = (signed long) depo_distance;
             mode = approach_mode;
-        }else if (mode == stop_mode){
-            mode = selection_mode;        
-        }                    
+        } else if (mode == stop_mode)
+            mode = selection_mode;
     }
     old_value_button = value;
 }
 
-void selection_scheduler(){    
-    // execute tasks
-    switch (sc) {
-        case 0:
-            acceleration_task();
-            brake_task();
-            mixer_task();
-            read_potentiometer_task();
-            display_depo_dist_task();   
-            display_speed_task();
-            read_slope_task();
-            read_ldr_task();
-            lamps_task();
-            read_button_task();
-            break;
-        case 1:
-            acceleration_task();
-            brake_task();
-            mixer_task();
-            read_potentiometer_task();
-            display_depo_dist_task();
-            display_speed_task();
-            read_slope_task();
-            read_ldr_task();
-            lamps_task();    
-            read_button_task();     
-            comm_server_task();              
-            break;
+
+void selection_scheduler()
+{
+    unsigned char sc = 0; // secondary cycle
+    unsigned long exe_start_time, exe_end_time, delta;
+
+    // set initial execution start time
+    exe_start_time = millis();
+
+    while (1) {
+        // execute tasks
+        switch (sc) {
+            case 0:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                read_potentiometer_task();
+                display_depo_dist_task();   
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();
+                read_button_task();
+                break;
+            case 1:
+                acceleration_task();
+                brake_task();
+                mixer_task();
+                read_potentiometer_task();
+                display_depo_dist_task();
+                display_speed_task();
+                read_slope_task();
+                read_ldr_task();
+                lamps_task();    
+                read_button_task();     
+                comm_server_task();              
+                break;
+        }
+
+        sc = (sc + 1) % DIST_SEL_NUM_SC;
+        exe_end_time = millis();
+
+        // get elapsed execution time
+        if (exe_start_time > exe_end_time)
+            delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
+        else
+            delta = (unsigned long) (exe_end_time - exe_start_time);
+
+        // panic: execution took too long
+        if (DIST_SEL_SC_TIME < delta)
+            exit(-1);
+
+        if (mode != selection_mode) {
+            // initialize time for distance update
+            distance_last_measure_time = micros();      
+            return;
+        }
+
+        // wait until next secondary cycle
+        delay(DIST_SEL_SC_TIME - delta + SC_REQUIRED_WAIT);
+        exe_start_time += DIST_SEL_SC_TIME;
     }
-
-    sc = (sc + 1) % NUM_SC;
-    exe_end_time = millis();
-
-    // get elapsed execution time
-    if (exe_start_time > exe_end_time)
-        delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
-    else
-        delta = (unsigned long) (exe_end_time - exe_start_time);
-
-    // panic: execution took too long
-    if (SC_TIME < delta)
-        exit(-1);
-
-    if (mode != selection_mode){
-      position_last_measure_time = micros();      
-      return;
-    }
-
-    // wait until next secondary cycle
-    delay(SC_TIME - delta + SC_REQUIRED_WAIT);
-    exe_start_time += SC_TIME;
-
 }
 
-void approach_scheduler(){
-    switch (sc) {
+
+void approach_scheduler()
+{
+    unsigned char sc = 0; // secondary cycle
+    unsigned long exe_start_time, exe_end_time, delta;
+
+    // set initial execution start time
+    exe_start_time = millis();
+
+    while (1) {
+        switch (sc) {
             case 0:
                 acceleration_task();
                 brake_task();
@@ -671,7 +707,7 @@ void approach_scheduler(){
                 break;
         }
 
-        sc = (sc + 1) % NUM_SC;
+        sc = (sc + 1) % APPROACH_NUM_SC;
         exe_end_time = millis();
 
         // get elapsed execution time
@@ -681,20 +717,29 @@ void approach_scheduler(){
             delta = (unsigned long) (exe_end_time - exe_start_time);
 
         // panic: execution took too long
-        if (SC_TIME < delta)
+        if (APPROACH_SC_TIME < delta)
             exit(-1);
 
-        if(mode != approach_mode){
-          return;
-        }
+        if (mode != approach_mode)
+            return;
 
         // wait until next secondary cycle
-        delay(SC_TIME - delta + SC_REQUIRED_WAIT);
-        exe_start_time += SC_TIME;
-
+        delay(APPROACH_SC_TIME - delta + SC_REQUIRED_WAIT);
+        exe_start_time += APPROACH_SC_TIME;
+    }
 }
-void stop_scheduler(){
-    switch (sc) {
+
+
+void stop_scheduler()
+{
+    unsigned char sc = 0; // secondary cycle
+    unsigned long exe_start_time, exe_end_time, delta;
+
+    // set initial execution start time
+    exe_start_time = millis();
+
+    while (1) {
+        switch (sc) {
             case 0:
                 acceleration_task();
                 brake_task();
@@ -718,7 +763,7 @@ void stop_scheduler(){
                 break;
         }
 
-        sc = (sc + 1) % NUM_SC;
+        sc = (sc + 1) % STOP_NUM_SC;
         exe_end_time = millis();
 
         // get elapsed execution time
@@ -728,19 +773,19 @@ void stop_scheduler(){
             delta = (unsigned long) (exe_end_time - exe_start_time);
 
         // panic: execution took too long
-        if (SC_TIME < delta)
+        if (STOP_SC_TIME < delta)
             exit(-1);
 
-        if(mode != stop_mode){
-          //Time updated so the speed starts from 0
-          speed_last_measure_time = micros();
-          return;
+        if (mode != stop_mode) {
+            // update time so the speed starts from 0 properly
+            speed_last_measure_time = micros();
+            return;
         }  
         
         // wait until next secondary cycle
-        delay(SC_TIME - delta + SC_REQUIRED_WAIT);
-        exe_start_time += SC_TIME;
-
+        delay(STOP_SC_TIME - delta + SC_REQUIRED_WAIT);
+        exe_start_time += STOP_SC_TIME;
+    }
 }
 
 
@@ -765,80 +810,20 @@ void setup()
 
     // set initial speed measure time
     speed_last_measure_time = micros();
-    
-
-    // set initial execution start time
-    exe_start_time = millis();
 }
 
-void loop(){
-  while (1){
-    switch(mode){
-      case selection_mode:
-        selection_scheduler();
-        break;
-      case approach_mode:
-        approach_scheduler();
-        break;
-      case stop_mode:
-        stop_scheduler();
-        break;
-      
-    }
-  }
-}
-/*void loop()
+
+void loop()
 {
-    unsigned long exe_end_time, delta;
-    
-    // execute tasks
-    switch (sc) {
-        case 0:
-            acceleration_task();
-            brake_task();
-            mixer_task();
-            read_potentiometer_task();
-            display_depo_dist_task();
-            display_speed_task();
-            read_slope_task();
-            read_ldr_task();
-            lamps_task();
-            read_button_task();                        
+    switch (mode) {
+        case selection_mode:
+            selection_scheduler();
             break;
-        case 1:
-            acceleration_task();
-            brake_task();
-            mixer_task();
-            read_potentiometer_task();
-            display_depo_dist_task();
-            display_speed_task();
-            read_slope_task();
-            read_ldr_task();
-            lamps_task();         
-            read_button_task();               
-            comm_server_task();
+        case approach_mode:
+            approach_scheduler();
+            break;
+        case stop_mode:
+            stop_scheduler();
             break;
     }
-
-    sc = (sc + 1) % NUM_SC;
-    exe_end_time = millis();
-
-    // get elapsed execution time
-    if (exe_start_time > exe_end_time)
-        delta = (unsigned long) (MAX_UNSIGNED_LONG - exe_start_time + exe_end_time);
-    else
-        delta = (unsigned long) (exe_end_time - exe_start_time);
-
-    // panic: execution took too long
-    if (SC_TIME < delta)
-        exit(-1);
-
-    // wait until next secondary cycle
-    delay(SC_TIME - delta + SC_REQUIRED_WAIT);
-    exe_start_time += SC_TIME;
-
-    
-    //TIME_TASK( read_button_task() );
-    //delay(100);
-    //Serial.println(elapsed);
-}*/
+}

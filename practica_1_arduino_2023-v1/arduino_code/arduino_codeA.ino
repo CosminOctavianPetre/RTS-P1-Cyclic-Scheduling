@@ -11,7 +11,7 @@
 #define SLAVE_ADDR          0x8
 #define MESSAGE_SIZE        8+2             // useful message size + required overhead ("/n", "/0")
 #define MAX_UNSIGNED_LONG   0xffffffffUL
-#define us                  1000000UL       // number of microsenconds in a second
+#define us                  1000000.0       // number of microsenconds in a second
 // Cyclic Scheduler stuff
 #define NUM_SC              4               // number of secondary cycles per main cycle
 #define SC_TIME             50UL            // secondary cycle time length
@@ -32,7 +32,7 @@
 // ------------------------------------
 // Slope Legal Values
 // ------------------------------------
-typedef enum{flat = 0, down = 1, up = 2} slope_t;
+typedef enum{flat, down, up} slope_t;
 
 
 // ------------------------------------
