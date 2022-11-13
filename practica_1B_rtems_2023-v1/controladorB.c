@@ -24,7 +24,7 @@
 
 
 //-------------------------------------
-//-  Useful functions from displayA.c
+//-  Useful functions from displayB.c
 //-------------------------------------
 void diffTime(struct timespec end, struct timespec start, struct timespec *diff);
 void addTime(struct timespec end, struct timespec start, struct timespec *add);

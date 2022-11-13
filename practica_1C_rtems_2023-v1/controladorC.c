@@ -24,7 +24,7 @@
 
 
 //-------------------------------------
-//-  Useful functions from displayA.c
+//-  Useful functions from displayC.c
 //-------------------------------------
 void diffTime(struct timespec end, struct timespec start, struct timespec *diff);
 void addTime(struct timespec end, struct timespec start, struct timespec *add);
@@ -423,7 +423,6 @@ void task_get_distance()
     CLEAR_BUFFERS(request, answer);
     MAKE_REQUEST(request, answer, REQ_DISTANCE);
 
-    //TODO: will this work with Arduino in distance selection mode? Should work, let's see
     if ( sscanf(answer, ANS_DISTANCE, &depo_distance) == 1 )
         displayDistance(depo_distance);
 }
