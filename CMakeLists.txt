@@ -25,5 +25,5 @@ endif()
 # add all section subdirectories
 list(APPEND Sections A B C D)
 foreach(section IN LISTS Sections)
-    add_subdirectory(practica_1${section}_rtems_2023-v1)
+    add_subdirectory(RTEMS_${section})
 endforeach()
