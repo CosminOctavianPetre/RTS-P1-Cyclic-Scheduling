@@ -298,6 +298,8 @@ void update_speed()
     MOD_SLOPE_DOWN*(railway_slope == down) + MOD_SLOPE_UP*(railway_slope == up);
 
     speed += acceleration * ((double) delta/us);
+    if (speed < 0)
+        speed = 0;
 }
 
 
