@@ -584,8 +584,6 @@ void stop_sched()
     is_dark = 1;
 
     while (1) {
-    // fprintf(stderr, "\n\n\nSTOP MODE REACHED\tSTOP MODE REACHED\tSTOP MODE REACHED\n\n\n");
-    // displayStop(1);
         // execute tasks
         switch (sc) {
             case 0:
