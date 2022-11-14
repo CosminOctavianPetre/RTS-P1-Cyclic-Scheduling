@@ -1,0 +1,26 @@
+int sc = 0;
+start = clock();
+
+while(1){
+	switch(sc){
+		case 0: ...
+		case 1: ...
+		case N-1: ...
+	}
+	
+	sc = (sc + 1) % N;
+	end = clock();
+	
+	if (start > end){
+		elapsed = MAX_INT - start + end;
+	} else{
+		elapsed = end - start;
+	}
+	
+	if(sc_time < elapsed){
+		exit();
+	}
+	
+	sleep(sc_time - elapsed);
+	start += sc_time;
+}
